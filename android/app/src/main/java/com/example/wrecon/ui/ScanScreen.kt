@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import com.example.wrecon.ClientDev
 import com.example.wrecon.JamConfig
 import com.example.wrecon.JamStats
@@ -65,8 +66,11 @@ private val PanelBorder = Color(0xFF233033)
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
-    val s by vm.ui.collectAsStateWithLifecycle()
-    val link by vm.linkState.collectAsStateWithLifecycle()
+    val m by vm.meta.collectAsStateWithLifecycle()
+    val cfg by vm.config.collectAsStateWithLifecycle()
+    val wifi by vm.wifi.collectAsStateWithLifecycle()
+    val clients by vm.clients.collectAsStateWithLifecycle()
+    val link = m.link
     val chScroll = rememberScrollState()
 
     Scaffold(
@@ -94,12 +98,12 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item(key = "status") { StatusCard(link, s.fw, s.chip, s.stats) }
-            item(key = "stats") { StatsRow(s.stats) }
+            item(key = "status") { StatusCard(link, m.fw, m.chip, vm.stats) }
+            item(key = "stats") { StatsRow(vm.stats) }
 
             item(key = "targets") {
                 TargetCard(
-                    targets = s.cfg.targets,
+                    targets = cfg.targets,
                     onRemove = { vm.toggleTarget(it) },
                     onSelectAll = { vm.selectAllVisible() },
                     onClear = { vm.clearTargets() },
@@ -109,7 +113,7 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
 
             item(key = "config") {
                 ConfigCard(
-                    cfg = s.cfg,
+                    cfg = cfg,
                     chScroll = chScroll,
                     onChannel = { ch -> vm.updateParams { it.copy(channel = ch) } },
                     onInterval = { v -> vm.updateParams { it.copy(intervalMs = v) } },
@@ -137,30 +141,31 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
                 }
             }
 
-            if (s.logs.isNotEmpty()) {
-                item(key = "log") { Text(s.logs.first(), color = Danger, fontSize = 11.sp) }
+            if (m.logs.isNotEmpty()) {
+                item(key = "log") { Text(m.logs.first(), color = Danger, fontSize = 11.sp) }
             }
 
             item(key = "tabs") {
-                TabRow(selectedTabIndex = s.tab) {
-                    Tab(s.tab == 0, { vm.selectTab(0) }, text = { Text("ACCESS POINTS") })
-                    Tab(s.tab == 1, { vm.selectTab(1) }, text = { Text("CLIENTS") })
+                TabRow(selectedTabIndex = m.tab) {
+                    Tab(m.tab == 0, { vm.selectTab(0) }, text = { Text("ACCESS POINTS") })
+                    Tab(m.tab == 1, { vm.selectTab(1) }, text = { Text("CLIENTS") })
                 }
             }
 
-            if (s.tab == 0) {
-                items(s.wifi, key = { it.bssid }) { ap ->
-                    ApRow(ap, ap.bssid in s.cfg.targets) { vm.toggleTarget(ap.bssid) }
+            if (m.tab == 0) {
+                items(wifi, key = { it.bssid }) { ap ->
+                    ApRow(ap, ap.bssid in cfg.targets) { vm.toggleTarget(ap.bssid) }
                 }
             } else {
-                items(s.clients, key = { it.addr }) { c -> ClientRow(c) }
+                items(clients, key = { it.addr }) { c -> ClientRow(c) }
             }
         }
     }
 }
 
 @Composable
-private fun StatusCard(link: LinkState, fw: String, chip: String, st: JamStats) {
+private fun StatusCard(link: LinkState, fw: String, chip: String, stats: StateFlow<JamStats>) {
+    val st by stats.collectAsStateWithLifecycle()
     val connected = link is LinkState.Connected
     val detail = when (link) {
         is LinkState.Connected -> "${link.device} · ${link.baud}"
@@ -201,7 +206,8 @@ private fun StatusCard(link: LinkState, fw: String, chip: String, st: JamStats) 
 }
 
 @Composable
-private fun StatsRow(st: JamStats) {
+private fun StatsRow(stats: StateFlow<JamStats>) {
+    val st by stats.collectAsStateWithLifecycle()
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Kpi("AP", st.aps.toString(), Modifier.weight(1f))
         Kpi("CLIENT", st.clients.toString(), Modifier.weight(1f))

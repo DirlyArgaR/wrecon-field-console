@@ -5,22 +5,18 @@ import android.hardware.usb.UsbDevice
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hoho.android.usbserial.driver.UsbSerialDriver
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class UiState(
+data class MetaState(
     val link: LinkState = LinkState.Disconnected,
-    val cfg: JamConfig = JamConfig(),
-    val wifi: List<WifiAp> = emptyList(),
-    val clients: List<ClientDev> = emptyList(),
-    val stats: JamStats = JamStats(),
     val fw: String = "-",
     val chip: String = "-",
     val logs: List<String> = emptyList(),
@@ -30,10 +26,21 @@ data class UiState(
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val link = UsbSerialLink(app)
-    val linkState: StateFlow<LinkState> = link.state
 
-    private val _ui = MutableStateFlow(UiState())
-    val ui: StateFlow<UiState> = _ui.asStateFlow()
+    private val _meta = MutableStateFlow(MetaState())
+    val meta: StateFlow<MetaState> = _meta.asStateFlow()
+
+    private val _config = MutableStateFlow(JamConfig())
+    val config: StateFlow<JamConfig> = _config.asStateFlow()
+
+    private val _wifi = MutableStateFlow<List<WifiAp>>(emptyList())
+    val wifi: StateFlow<List<WifiAp>> = _wifi.asStateFlow()
+
+    private val _clients = MutableStateFlow<List<ClientDev>>(emptyList())
+    val clients: StateFlow<List<ClientDev>> = _clients.asStateFlow()
+
+    private val _stats = MutableStateFlow(JamStats())
+    val stats: StateFlow<JamStats> = _stats.asStateFlow()
 
     private val wifiMap = ConcurrentHashMap<String, WifiAp>()
     private val clientMap = ConcurrentHashMap<String, ClientDev>()
@@ -44,20 +51,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             link.lines.collect { onLine(it) }
         }
         viewModelScope.launch {
-            link.state.collect { st -> _ui.update { it.copy(link = st) } }
+            link.state.collect { st -> _meta.update { it.copy(link = st) } }
         }
-        // Publish daftar maksimal ~4 fps. Firmware bisa mengirim puluhan
-        // event/detik; tanpa ini Compose recompose + sort tiap baris masuk.
+        // Publish daftar hanya kalau berubah, maksimal ~3 fps.
         viewModelScope.launch {
             while (isActive) {
-                delay(250)
+                delay(320)
                 if (!listsDirty.getAndSet(false)) continue
-                _ui.update { st ->
-                    st.copy(
-                        wifi = wifiMap.values.sortedByDescending { it.rssi }.take(40),
-                        clients = clientMap.values.sortedByDescending { it.rssi }.take(60),
-                    )
-                }
+                _wifi.value = wifiMap.values.sortedByDescending { it.rssi }.take(30)
+                _clients.value = clientMap.values.sortedByDescending { it.rssi }.take(30)
             }
         }
     }
@@ -80,13 +82,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleTarget(bssid: String) {
-        val next = _ui.value.cfg.targets.toMutableSet()
+        val next = _config.value.targets.toMutableSet()
         if (!next.add(bssid)) next.remove(bssid)
         setTargets(next)
     }
 
     fun selectAllVisible() {
-        val all = (_ui.value.cfg.targets + wifiMap.keys).toSet()
+        val all = (_config.value.targets + wifiMap.keys).toSet()
         setTargets(all)
     }
 
@@ -98,12 +100,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             log("MAC tidak valid")
             return
         }
-        setTargets((_ui.value.cfg.targets + clean).toSet())
+        setTargets((_config.value.targets + clean).toSet())
     }
 
     private fun setTargets(set: Set<String>) {
         val list = set.toList().sorted()
-        _ui.update { it.copy(cfg = it.cfg.copy(targets = list)) }
+        _config.update { it.copy(targets = list) }
         send(Protocol.targets(list))
     }
 
@@ -111,8 +113,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun stopJam() = send(Protocol.jamStop())
 
     fun updateParams(block: (JamConfig) -> JamConfig) {
-        val next = block(_ui.value.cfg)
-        _ui.update { it.copy(cfg = next) }
+        val next = block(_config.value)
+        _config.value = next
         send(Protocol.setParams(next))
     }
 
@@ -120,32 +122,39 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         wifiMap.clear()
         clientMap.clear()
         listsDirty.set(true)
-        _ui.update { it.copy(wifi = emptyList(), clients = emptyList()) }
+        _wifi.value = emptyList()
+        _clients.value = emptyList()
         send(Protocol.clear())
     }
 
-    fun selectTab(tab: Int) = _ui.update { it.copy(tab = tab) }
+    fun selectTab(tab: Int) = _meta.update { it.copy(tab = tab) }
 
     private fun send(line: String) {
         if (!link.send(line)) log("USB belum terhubung")
     }
 
     private fun log(s: String) {
-        _ui.update { it.copy(logs = (listOf(s) + it.logs).take(5)) }
+        _meta.update { it.copy(logs = (listOf(s) + it.logs).take(3)) }
     }
 
     private fun onLine(line: String) {
         when (val msg = Protocol.parse(line)) {
-            is Msg.Hello -> _ui.update { it.copy(fw = msg.fw, chip = msg.chip) }
+            is Msg.Hello -> _meta.update { it.copy(fw = msg.fw, chip = msg.chip) }
+
             is Msg.Config -> {
-                _ui.update { it.copy(cfg = msg.cfg) }
-                // Kurangi beban serial/UI: firmware default repeat 1500 ms.
-                if (msg.cfg.repeatMs < 3000) updateParams { it.copy(repeatMs = 3000) }
+                _config.value = msg.cfg
+                // Turunkan beban serial: event lebih jarang, status lebih jarang.
+                if (msg.cfg.repeatMs < 4000 || msg.cfg.statsMs < 5000) {
+                    updateParams { it.copy(repeatMs = 4000, statsMs = 5000) }
+                }
             }
+
             is Msg.Rsp -> if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
-            is Msg.Status -> _ui.update { it.copy(stats = msg.stats) }
+            is Msg.Status -> _stats.value = msg.stats
+
             is Msg.Wifi -> { wifiMap[msg.ap.bssid] = msg.ap; listsDirty.set(true) }
             is Msg.Client -> { clientMap[msg.dev.addr] = msg.dev; listsDirty.set(true) }
+
             null -> Unit
         }
     }
