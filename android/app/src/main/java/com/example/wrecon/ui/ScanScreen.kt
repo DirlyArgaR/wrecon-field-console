@@ -2,6 +2,7 @@ package com.example.wrecon.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +56,6 @@ import com.example.wrecon.JamStats
 import com.example.wrecon.LinkState
 import com.example.wrecon.ScanViewModel
 import com.example.wrecon.WifiAp
-import kotlin.math.abs
 
 private val Accent = Color(0xFF5CE1C6)
 private val Danger = Color(0xFFFF5F56)
@@ -153,11 +153,11 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
             }
 
             if (m.tab == 0) {
-                items(wifi, key = { it.bssid }) { ap ->
+                items(wifi, key = { it.bssid }, contentType = { "ap" }) { ap ->
                     ApRow(ap, ap.bssid in cfg.targets) { vm.toggleTarget(ap.bssid) }
                 }
             } else {
-                items(clients, key = { it.addr }) { c -> ClientRow(c) }
+                items(clients, key = { it.addr }, contentType = { "client" }) { c -> ClientRow(c) }
             }
         }
     }
@@ -362,64 +362,61 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun ApRow(ap: WifiAp, selected: Boolean, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) Color(0xFF162223) else Panel,
-        ),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth(),
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) Color(0xFF162223) else Panel)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 8.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FilterChip(selected = selected, onClick = onClick, label = { Text("PICK", fontSize = 9.sp) })
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(ap.ssid.ifEmpty { "(hidden)" }, color = if (selected) Accent else Color.White, fontSize = 12.sp)
-                Text("${ap.bssid} · ch ${ap.ch} · ${ap.auth} · ${ap.hits}x", color = Muted, fontSize = 9.sp)
-            }
-            Signal(ap.rssi)
+        Box(
+            Modifier.size(8.dp).clip(RoundedCornerShape(50))
+                .background(if (selected) Accent else PanelBorder)
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(ap.ssid.ifEmpty { "(hidden)" }, color = if (selected) Accent else Color.White, fontSize = 12.sp)
+            Text("${ap.bssid} · ch ${ap.ch} · ${ap.auth} · ${ap.hits}x", color = Muted, fontSize = 9.sp)
         }
+        Signal(ap.rssi)
     }
 }
 
 @Composable
 private fun ClientRow(c: ClientDev) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(8.dp)) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp).fillMaxWidth()) {
-            Column(Modifier.weight(1f)) {
-                Text(c.addr, color = Color.White, fontSize = 12.sp)
-                Text("→ ${c.bssid} · ch ${c.ch} · ${c.hits}x", color = Muted, fontSize = 9.sp)
-            }
-            Signal(c.rssi)
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(Panel)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(c.addr, color = Color.White, fontSize = 12.sp)
+            Text("→ ${c.bssid} · ch ${c.ch} · ${c.hits}x", color = Muted, fontSize = 9.sp)
         }
+        Signal(c.rssi)
     }
 }
 
 @Composable
 private fun Signal(rssi: Int) {
-    val level = ((abs(rssi) - 30).coerceIn(0, 70) / 14f).coerceIn(0f, 4f)
-    val activeBars = (5f - level).toInt().coerceIn(0, 4)
+    val width = ((rssi + 100).coerceIn(10, 70) * 0.5f).dp
+    val color = when {
+        rssi >= -70 -> Accent
+        rssi >= -88 -> Color(0xFFF2B544)
+        else -> Danger
+    }
     Column(horizontalAlignment = Alignment.End) {
         Text("$rssi", color = Muted, fontSize = 9.sp)
         Spacer(Modifier.height(3.dp))
-        Row(
-            Modifier.width(28.dp).height(14.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            (0..3).forEach { i ->
-                val active = i < activeBars
-                Box(
-                    Modifier.weight(1f).height(((i + 1) * 3).dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(if (active) Accent else PanelBorder)
-                )
-            }
-        }
+        Box(
+            Modifier.width(width).height(5.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(color)
+        )
     }
 }
