@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WRECON // Field Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">WRECON <span>// FIELD CONSOLE</span></div>
+    <div class="conn">
+      <span class="dot" id="conn-dot"></span>
+      <span class="conn-label" id="conn-label">OFFLINE</span>
+      <select id="port" aria-label="Serial port"></select>
+      <input id="baud" type="number" value="921600" aria-label="Baud rate">
+      <button id="btn-refresh-ports" class="ghost">PORTS</button>
+      <button id="btn-connect">CONNECT</button>
+      <button id="btn-disconnect" class="ghost">DISCONNECT</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel wide">
+      <div class="panel-head">
+        <span>SPECTRUM / DEVICES</span>
+        <button id="btn-clear" class="ghost small">CLEAR</button>
+      </div>
+      <div class="two-col">
+        <div>
+          <h3>ACCESS POINTS <span class="muted" id="ap-count">0</span></h3>
+          <table id="ap-table">
+            <thead><tr><th></th><th>BSSID</th><th>SSID</th><th>CH</th><th>RSSI</th><th>AUTH</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div>
+          <h3>CLIENTS <span class="muted" id="sta-count">0</span></h3>
+          <table id="sta-table">
+            <thead><tr><th></th><th>MAC</th><th>BSSID</th><th>CH</th><th>RSSI</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btn-select-all" class="ghost">SELECT ALL AP</button>
+        <button id="btn-add-selected">ADD SELECTED &rarr; TARGETS</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span>TARGETS</span>
+        <span class="badge" id="target-count">0</span>
+      </div>
+      <div class="chips" id="target-chips"></div>
+      <div class="row">
+        <input id="manual-mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">
+        <button id="btn-add-manual" class="ghost">ADD MAC</button>
+      </div>
+      <p class="muted small-note">TX hanya ke BSSID yang masuk daftar ini.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>JAM PARAMETERS</span></div>
+      <div class="form-grid">
+        <label>CHANNEL<input id="cfg-channel" type="number" min="1" max="13" value="6"></label>
+        <label>INTERVAL MS<input id="cfg-interval" type="number" min="1" max="1000" value="5"></label>
+        <label>BURST<input id="cfg-burst" type="number" min="1" max="100" value="8"></label>
+        <label>BURST GAP MS<input id="cfg-gap" type="number" min="0" max="5000" value="30"></label>
+        <label>HOP MS<input id="cfg-hop-ms" type="number" min="10" max="5000" value="200"></label>
+        <label>REASON
+          <select id="cfg-reason">
+            <option value="1">1 — unspecified</option>
+            <option value="4">4 — inactive</option>
+            <option value="7" selected>7 — class 3 / non-associated</option>
+            <option value="8">8 — leaving ESS</option>
+          </select>
+        </label>
+        <label>RSSI MIN<input id="cfg-rssi" type="number" min="-120" max="0" value="-95"></label>
+        <label class="check"><input id="cfg-hop" type="checkbox"> HOP 1&ndash;13</label>
+        <label class="check"><input id="cfg-broadcast" type="checkbox" checked> BROADCAST</label>
+        <label class="check"><input id="cfg-disassoc" type="checkbox"> DISASSOC</label>
+        <label class="check"><input id="cfg-apif" type="checkbox" checked> AP INTERFACE</label>
+      </div>
+      <button id="btn-apply">APPLY PARAMS</button>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>TRANSMIT</span></div>
+      <div class="row">
+        <button id="btn-start" class="danger">START JAM</button>
+        <button id="btn-stop" class="ghost">STOP JAM</button>
+      </div>
+      <div class="stats">
+        <div><span>STATE</span><strong id="st-jam">IDLE</strong></div>
+        <div><span>CHANNEL</span><strong id="st-ch">-</strong></div>
+        <div><span>FRAMES RX</span><strong id="st-frames">0</strong></div>
+        <div><span>AP / CLIENT</span><strong id="st-unique">0 / 0</strong></div>
+        <div><span>TX SENT</span><strong id="st-tx">0</strong></div>
+        <div><span>TX ERR</span><strong id="st-err">0</strong></div>
+        <div><span>DROPPED</span><strong id="st-drop">0</strong></div>
+      </div>
+    </section>
+
+    <section class="panel wide">
+      <div class="panel-head"><span>SERIAL LOG</span></div>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "wrecon-web-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser console for ESP32 NDJSON serial devices (passive recon + deauth lab controller)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "serialport": "^12.0.0"
+  },
+  "allowScripts": {
+    "@serialport/bindings-cpp@12.0.1": true
+  }
+}

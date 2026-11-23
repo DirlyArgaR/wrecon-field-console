@@ -1,0 +1,18 @@
+# PlatformIO
+firmware/.pio/
+jammer-firmware/.pio/
+
+# Node
+web/node_modules/
+
+# Gradle / Android
+android/.gradle/
+android/local.properties
+android/app/build/
+android/.idea/
+android/*.iml
+
+# Umum
+*.apk
+*.bin
+.DS_Store
