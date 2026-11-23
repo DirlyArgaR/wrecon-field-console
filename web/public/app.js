@@ -157,6 +157,22 @@ function renderConfigFromSnap() {
   if (p.hop !== undefined) $('cfg-hop').checked = !!p.hop;
   if (p.broadcast !== undefined) $('cfg-broadcast').checked = !!p.broadcast;
   if (p.disassoc !== undefined) $('cfg-disassoc').checked = !!p.disassoc;
+
+  setVal('ble-mode', p.ble_mode);
+  setVal('ble-adv-ms', p.ble_adv_ms);
+  setVal('ble-gap-ms', p.ble_burst_gap_ms);
+  setVal('ble-power', p.ble_power);
+  setVal('radio-module', p.radio_module);
+  setVal('cc-mode', p.cc_mode);
+  setVal('cc-freq', p.cc_freq);
+  setVal('nrf-mode', p.nrf_mode);
+  setVal('nrf-ch', p.nrf_channel);
+  setVal('pin-cc-cs', p.pin_cc_cs);
+  setVal('pin-nrf-ce', p.pin_nrf_ce);
+  setVal('pin-nrf-cs', p.pin_nrf_cs);
+  setVal('pin-sck', p.pin_spi_sck);
+  setVal('pin-miso', p.pin_spi_miso);
+  setVal('pin-mosi', p.pin_spi_mosi);
 }
 
 function isJammerFirmware() {
@@ -178,6 +194,10 @@ function renderConn() {
   $('btn-start').disabled = !jammer;
   $('btn-stop').disabled = !jammer;
   $('btn-apply').disabled = !jammer;
+  $('btn-ble-start').disabled = !jammer;
+  $('btn-ble-stop').disabled = !jammer;
+  $('btn-radio-start').disabled = !jammer;
+  $('btn-radio-stop').disabled = !jammer;
 }
 
 function renderTables() {
@@ -258,11 +278,27 @@ function renderLog() {
   $('log').scrollTop = $('log').scrollHeight;
 }
 
+function renderExtra() {
+  const ble = (snap.status && snap.status.ble) || {};
+  const radio = (snap.status && snap.status.radio) || {};
+  $('ble-state').textContent = ble.running ? 'ACTIVE' : 'IDLE';
+  $('ble-state').classList.toggle('active', !!ble.running);
+  $('ble-sent').textContent = ble.sent || 0;
+  $('ble-err').textContent = ble.errors || 0;
+
+  $('radio-state').textContent = radio.running ? 'ACTIVE' : 'IDLE';
+  $('radio-state').classList.toggle('active', !!radio.running);
+  $('radio-sent').textContent = radio.sent || 0;
+  $('cc-ready').textContent = radio.cc_ready ? 'OK' : '-';
+  $('nrf-ready').textContent = radio.nrf_ready ? 'OK' : '-';
+}
+
 function renderAll() {
   renderConn();
   renderTables();
   renderTargets();
   renderStats();
+  renderExtra();
   renderLog();
 }
 
@@ -316,6 +352,36 @@ function startJam() {
   });
 }
 
+function bleStart() {
+  const params = {
+    ble_mode: Number($('ble-mode').value),
+    ble_adv_ms: Number($('ble-adv-ms').value),
+    ble_burst_gap_ms: Number($('ble-gap-ms').value),
+    ble_power: Number($('ble-power').value),
+  };
+  const hex = $('ble-custom').value.trim();
+  send(hex ? { cmd: 'ble_start', params, payload: hex } : { cmd: 'ble_start', params });
+}
+
+function radioStart() {
+  send({
+    cmd: 'radio_start',
+    params: {
+      radio_module: Number($('radio-module').value),
+      cc_mode: Number($('cc-mode').value),
+      cc_freq: Number($('cc-freq').value),
+      nrf_mode: Number($('nrf-mode').value),
+      nrf_channel: Number($('nrf-ch').value),
+      pin_cc_cs: Number($('pin-cc-cs').value),
+      pin_nrf_ce: Number($('pin-nrf-ce').value),
+      pin_nrf_cs: Number($('pin-nrf-cs').value),
+      pin_spi_sck: Number($('pin-sck').value),
+      pin_spi_miso: Number($('pin-miso').value),
+      pin_spi_mosi: Number($('pin-mosi').value),
+    },
+  });
+}
+
 /* ---- wiring ----------------------------------------------------------- */
 
 $('btn-refresh-ports').addEventListener('click', refreshPorts);
@@ -334,6 +400,10 @@ $('manual-mac').addEventListener('keydown', (e) => {
 });
 $('btn-start').addEventListener('click', startJam);
 $('btn-stop').addEventListener('click', () => send({ cmd: 'jam_stop' }));
+$('btn-ble-start').addEventListener('click', bleStart);
+$('btn-ble-stop').addEventListener('click', () => send({ cmd: 'ble_stop' }));
+$('btn-radio-start').addEventListener('click', radioStart);
+$('btn-radio-stop').addEventListener('click', () => send({ cmd: 'radio_stop' }));
 $('btn-clear').addEventListener('click', () => {
   snap.aps = [];
   snap.stas = [];

@@ -104,6 +104,76 @@
       </div>
     </section>
 
+    <section class="panel">
+      <div class="panel-head"><span>BLUETOOTH</span></div>
+      <div class="form-grid">
+        <label>MODE
+          <select id="ble-mode">
+            <option value="1">1 — vendor payload</option>
+            <option value="2">2 — random manufacturer</option>
+            <option value="3">3 — both</option>
+            <option value="4">4 — custom hex</option>
+          </select>
+        </label>
+        <label>ADV MS<input id="ble-adv-ms" type="number" min="5" max="1000" value="25"></label>
+        <label>BURST GAP MS<input id="ble-gap-ms" type="number" min="0" max="5000" value="10"></label>
+        <label>TX POWER<input id="ble-power" type="number" min="0" max="9" value="9"></label>
+      </div>
+      <div class="row"><input id="ble-custom" placeholder="1e ff 4c 00 ..." maxlength="93"></div>
+      <div class="row">
+        <button id="btn-ble-start" class="danger">BLE START</button>
+        <button id="btn-ble-stop" class="ghost">BLE STOP</button>
+      </div>
+      <div class="stats">
+        <div><span>STATE</span><strong id="ble-state">IDLE</strong></div>
+        <div><span>SENT</span><strong id="ble-sent">0</strong></div>
+        <div><span>ERRORS</span><strong id="ble-err">0</strong></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><span>RADIO</span></div>
+      <div class="form-grid">
+        <label>MODULE
+          <select id="radio-module">
+            <option value="1">1 — CC1101 subGHz</option>
+            <option value="2">2 — nRF24 2.4G</option>
+            <option value="3">3 — both</option>
+          </select>
+        </label>
+        <label>CC MODE
+          <select id="cc-mode">
+            <option value="1">1 — single freq</option>
+            <option value="2">2 — sweep bands</option>
+          </select>
+        </label>
+        <label>CC FREQ (MHz)<input id="cc-freq" type="number" min="300" max="930" step="0.01" value="433.92"></label>
+        <label>NRF MODE
+          <select id="nrf-mode">
+            <option value="1">1 — single channel</option>
+            <option value="2">2 — sweep 0..125</option>
+          </select>
+        </label>
+        <label>NRF CHANNEL<input id="nrf-ch" type="number" min="0" max="125" value="0"></label>
+        <label>CC CS<input id="pin-cc-cs" type="number" min="0" max="34" value="5"></label>
+        <label>NRF CE<input id="pin-nrf-ce" type="number" min="0" max="34" value="4"></label>
+        <label>NRF CS<input id="pin-nrf-cs" type="number" min="0" max="34" value="15"></label>
+        <label>SPI SCK<input id="pin-sck" type="number" min="0" max="34" value="18"></label>
+        <label>SPI MISO<input id="pin-miso" type="number" min="0" max="34" value="19"></label>
+        <label>SPI MOSI<input id="pin-mosi" type="number" min="0" max="34" value="23"></label>
+      </div>
+      <div class="row">
+        <button id="btn-radio-start" class="danger">RADIO START</button>
+        <button id="btn-radio-stop" class="ghost">RADIO STOP</button>
+      </div>
+      <div class="stats">
+        <div><span>STATE</span><strong id="radio-state">IDLE</strong></div>
+        <div><span>SENT</span><strong id="radio-sent">0</strong></div>
+        <div><span>CC1101</span><strong id="cc-ready">-</strong></div>
+        <div><span>NRF24</span><strong id="nrf-ready">-</strong></div>
+      </div>
+    </section>
+
     <section class="panel wide">
       <div class="panel-head"><span>SERIAL LOG</span></div>
       <pre id="log"></pre>

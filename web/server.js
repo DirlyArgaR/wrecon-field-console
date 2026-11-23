@@ -33,7 +33,8 @@ const sseClients = new Set();
 
 const KNOWN = new Set([
   'ping', 'status', 'config', 'set', 'targets', 'clear',
-  'jam_start', 'jam_stop', 'reset',
+  'jam_start', 'jam_stop', 'ble_start', 'ble_stop',
+  'radio_start', 'radio_stop', 'reset',
   'mode', 'get_status', 'get_config', 'set_config',
   'scan_wifi', 'scan_ble', 'scan_all', 'stop', 'get_results',
 ]);

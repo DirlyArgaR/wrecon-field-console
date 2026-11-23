@@ -30,6 +30,25 @@ perintah TX tambahan. Firmware: `jammer-firmware/`.
 {"cmd":"targets","targets":["AA:BB:CC:DD:EE:FF"]}
 {"cmd":"jam_start","targets":["AA:BB:CC:DD:EE:FF"],"client_targets":["11:22:33:44:55:66"]}
 {"cmd":"jam_stop"}
+
+{"cmd":"ble_start","params":{
+  "ble_mode":1,                  // 1 vendor, 2 random, 3 both, 4 custom
+  "ble_adv_ms":25,               // 5..1000
+  "ble_burst_gap_ms":10,         // 0..5000
+  "ble_power":9                  // 0..9
+},"payload":"1e ff 4c 00 ..."}   // opsional, hex, maks 31 byte -> mode 4
+{"cmd":"ble_stop"}
+
+{"cmd":"radio_start","params":{
+  "radio_module":1,              // 1 CC1101, 2 nRF24, 3 dua-duanya
+  "cc_mode":1,                   // 1 single freq, 2 sweep band
+  "cc_freq":433.92,              // 300..930 MHz
+  "nrf_mode":1,                  // 1 single channel, 2 sweep 0..125
+  "nrf_channel":0,
+  "pin_cc_cs":5,"pin_nrf_ce":4,"pin_nrf_cs":15,
+  "pin_spi_sck":18,"pin_spi_miso":19,"pin_spi_mosi":23
+}}
+{"cmd":"radio_stop"}
 ```
 
 `jam_start` mengganti target bila `targets` dikirim. `client_targets` hanya
@@ -47,7 +66,9 @@ BSSID-nya diketahui.
 {"type":"status","ts":12345,"jamming":true,"channel":6,
  "targets":1,
  "stats":{"frames":420,"aps":38,"clients":12,"tx":8000,"tx_errors":0,
-          "rx_dropped":0,"ring_dropped":0}}
+          "rx_dropped":0,"ring_dropped":0},
+ "ble":{"running":false,"sent":0,"errors":0},
+ "radio":{"running":false,"sent":0,"cc_ready":false,"nrf_ready":false}}
 
 {"type":"wifi","ts":12345,"bssid":"AA:BB:CC:DD:EE:FF","ssid":"lab",
  "hidden":false,"ch":6,"rssi":-61,"auth":"wpa2","hits":3}
