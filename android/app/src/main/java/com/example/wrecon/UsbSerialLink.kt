@@ -95,11 +95,13 @@ class UsbSerialLink(private val ctx: Context) {
         }
     }
 
-    fun send(line: String): Boolean = try {
-        val p = port ?: return false
-        p.write((line + "\n").toByteArray(Charsets.US_ASCII), 500) >= 0
-    } catch (_: Exception) {
-        false
+    fun send(line: String): Boolean {
+        return try {
+            val p = port ?: return false
+            p.write((line + "\n").toByteArray(Charsets.US_ASCII), 500) >= 0
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun close() {
