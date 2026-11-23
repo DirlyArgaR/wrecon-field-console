@@ -1188,12 +1188,11 @@ static void handleLine(const char *line) {
     g_btRunning = false;
     g_btDiscoveryActive = false;
     g_btConnected = false;
-    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
-      g_btDevs[i] = BtDev();
-      g_btNameAsked[i] = Target();
-    }
+    // Hasil scan sebelumnya sengaja dipertahankan supaya tidak hilang
+    // kalau sweep berikutnya tidak menemukan perangkat baru.
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) g_btNameAsked[i] = Target();
     g_btDevCount = 0;
-    g_btEvict = 0;
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) if (g_btDevs[i].used) g_btDevCount++;
     g_btAutoAdd = g_cfg.btAutoAdd;
     g_btScanMs = g_cfg.btScanMs;
     g_btScanStarted = millis();

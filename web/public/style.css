@@ -90,9 +90,11 @@ button:disabled { opacity: .3; cursor: not-allowed; border-color: var(--line); c
 }
 .tab-panel { display: none; min-height: 0; gap: 10px; grid-template-columns: 1fr 1fr; }
 .tab-panel.active { display: grid; }
+.tab-panel[data-panel="bt"] { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); }
 .tab-panel[data-panel="log"] { grid-template-columns: 1fr; }
 
 .panel {
+  min-width: 0;
   min-height: 0; background: var(--panel);
   border: 1px solid var(--line); border-radius: 4px;
   display: flex; flex-direction: column; overflow: hidden;
@@ -108,7 +110,7 @@ h3 { font-size: 10px; letter-spacing: .1em; color: var(--muted); margin: 0 0 6px
 h3:not(:first-child) { margin-top: 12px; }
 
 /* ---- tables ---- */
-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
 th { text-align: left; color: var(--muted); font-weight: normal; font-size: 9px; letter-spacing: .08em; position: sticky; top: 0; background: var(--panel); }
 th, td { padding: 3px 5px; border-bottom: 1px solid #182324; }
 tbody tr:hover { background: var(--panel-2); }
