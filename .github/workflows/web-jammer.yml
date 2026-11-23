@@ -6,12 +6,14 @@ on:
     paths:
       - 'web/**'
       - 'jammer-firmware/**'
+      - 'bt-jammer-firmware/**'
       - 'docs/JAM_PROTOCOL.md'
       - '.github/workflows/web-jammer.yml'
   pull_request:
     paths:
       - 'web/**'
       - 'jammer-firmware/**'
+      - 'bt-jammer-firmware/**'
       - 'docs/JAM_PROTOCOL.md'
       - '.github/workflows/web-jammer.yml'
   workflow_dispatch:
@@ -88,4 +90,29 @@ jobs:
         with:
           name: jammer-firmware-bin
           path: jammer-firmware/.pio/build/esp32dev/firmware.bin
+          if-no-files-found: error
+
+  bt-firmware:
+    name: Dedicated BT jammer (ESP32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+
+      - name: Build
+        working-directory: bt-jammer-firmware
+        run: pio run -e esp32dev
+
+      - name: Upload firmware binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt-jammer-firmware-bin
+          path: bt-jammer-firmware/.pio/build/esp32dev/firmware.bin
           if-no-files-found: error

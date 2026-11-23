@@ -1,6 +1,7 @@
 # PlatformIO
 firmware/.pio/
 jammer-firmware/.pio/
+bt-jammer-firmware/.pio/
 
 # Node
 web/node_modules/

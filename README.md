@@ -141,6 +141,9 @@ pio run -e esp32dev
 pio run -e esp32dev -t upload
 ```
 
+`bt-jammer-firmware/` adalah firmware Bluetooth dedicated: begitu power langsung
+BLE advertising flood + BR/EDR inquiry flood + auto connect/disconnect, tanpa web.
+
 Protokol TX: [docs/JAM_PROTOCOL.md](docs/JAM_PROTOCOL.md). GitHub Actions:
 `.github/workflows/web-jammer.yml` mem-build keduanya dan menghasilkan artifact
 `wrecon-webconsole` serta `jammer-firmware-bin`.
