@@ -8,8 +8,11 @@ import com.hoho.android.usbserial.driver.UsbSerialDriver
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 data class UiState(
     val link: LinkState = LinkState.Disconnected,
@@ -31,8 +34,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
-    private val wifiMap = LinkedHashMap<String, WifiAp>()
-    private val clientMap = LinkedHashMap<String, ClientDev>()
+    private val wifiMap = ConcurrentHashMap<String, WifiAp>()
+    private val clientMap = ConcurrentHashMap<String, ClientDev>()
 
     init {
         viewModelScope.launch {
@@ -40,6 +43,19 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             link.state.collect { st -> _ui.update { it.copy(link = st) } }
+        }
+        // Publish daftar maksimal ~4 fps. Firmware bisa mengirim puluhan
+        // event/detik; tanpa ini Compose recompose + sort tiap baris masuk.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(250)
+                _ui.update { st ->
+                    st.copy(
+                        wifi = wifiMap.values.sortedByDescending { it.rssi },
+                        clients = clientMap.values.sortedByDescending { it.rssi },
+                    )
+                }
+            }
         }
     }
 
@@ -117,17 +133,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private fun onLine(line: String) {
         when (val msg = Protocol.parse(line)) {
             is Msg.Hello -> _ui.update { it.copy(fw = msg.fw, chip = msg.chip) }
-            is Msg.Config -> _ui.update { it.copy(cfg = msg.cfg) }
+            is Msg.Config -> {
+                _ui.update { it.copy(cfg = msg.cfg) }
+                // Kurangi beban serial/UI: firmware default repeat 1500 ms.
+                if (msg.cfg.repeatMs < 3000) updateParams { it.copy(repeatMs = 3000) }
+            }
             is Msg.Rsp -> if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
             is Msg.Status -> _ui.update { it.copy(stats = msg.stats) }
-            is Msg.Wifi -> {
-                wifiMap[msg.ap.bssid] = msg.ap
-                _ui.update { it.copy(wifi = wifiMap.values.sortedByDescending { a -> a.rssi }) }
-            }
-            is Msg.Client -> {
-                clientMap[msg.dev.addr] = msg.dev
-                _ui.update { it.copy(clients = clientMap.values.sortedByDescending { c -> c.rssi }) }
-            }
+            is Msg.Wifi -> wifiMap[msg.ap.bssid] = msg.ap
+            is Msg.Client -> clientMap[msg.dev.addr] = msg.dev
             null -> Unit
         }
     }
