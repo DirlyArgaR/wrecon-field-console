@@ -316,7 +316,7 @@ function renderExtra() {
   $('bt-device-count').textContent = devices.length;
   $('bt-devices').querySelector('tbody').innerHTML = devices.slice().reverse().map((d) => `
     <tr>
-      <td title="${esc(d.name || '')}">${esc(d.name || '&lt;unknown&gt;')}</td>
+      <td title="${esc(d.name || '')}">${esc(d.name || '<unknown>')}</td>
       <td>${esc(d.addr)}</td>
       <td>${esc(d.rssi)}</td>
       <td><button class="small ghost" data-bt-device="${esc(d.addr)}">ADD</button></td>

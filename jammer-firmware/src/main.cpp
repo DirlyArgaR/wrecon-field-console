@@ -174,9 +174,11 @@ struct BtDev {
   uint32_t cod = 0;
   uint16_t hits = 0;
   uint32_t lastSeen = 0;
+  bool     nameOnly = false;
 };
 #define MAX_BT_DEVS 48
 static BtDev   g_btDevs[MAX_BT_DEVS];
+static Target  g_btNameAsked[MAX_BT_DEVS];
 static uint16_t g_btDevCount = 0;
 static BtDev   g_btPending;
 static volatile bool g_btPendingNew = false;
@@ -348,7 +350,23 @@ static void bleTick() {
 /* ---- Bluetooth Classic (BR/EDR) ---------------------------------------- */
 
 static void btGapCb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
-  if (event != ESP_BT_GAP_DISC_RES_EVT || g_btPendingNew) return;
+  if (g_btPendingNew) return;
+
+  if (event == ESP_BT_GAP_READ_REMOTE_NAME_EVT) {
+    if (param->read_rmt_name.stat != ESP_BT_STATUS_SUCCESS) return;
+    memset(&g_btPending, 0, sizeof(g_btPending));
+    memcpy(g_btPending.mac, param->read_rmt_name.bda, 6);
+    uint8_t n = 0;
+    while (n < sizeof(g_btPending.name) - 1 && param->read_rmt_name.rmt_name[n]) n++;
+    memcpy(g_btPending.name, param->read_rmt_name.rmt_name, n);
+    g_btPending.name[n] = 0;
+    g_btPending.nameOnly = true;
+    g_btPendingNew = true;
+    return;
+  }
+
+  if (event != ESP_BT_GAP_DISC_RES_EVT) return;
+
   memset(&g_btPending, 0, sizeof(g_btPending));
   memcpy(g_btPending.mac, param->disc_res.bda, 6);
   g_btPending.rssi = -127;
@@ -362,6 +380,25 @@ static void btGapCb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
       g_btPending.rssi = ((int8_t *)p.val)[0];
     } else if (p.type == ESP_BT_GAP_DEV_PROP_COD && p.val && p.len >= 4) {
       g_btPending.cod = *(uint32_t *)p.val;
+    }
+  }
+
+  if (!g_btPending.name[0]) {
+    bool asked = false;
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
+      if (g_btNameAsked[i].used && memcmp(g_btNameAsked[i].bssid, g_btPending.mac, 6) == 0) {
+        asked = true;
+        break;
+      }
+    }
+    if (!asked) {
+      for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
+        if (g_btNameAsked[i].used) continue;
+        g_btNameAsked[i].used = true;
+        memcpy(g_btNameAsked[i].bssid, g_btPending.mac, 6);
+        esp_bt_gap_read_remote_name(g_btPending.mac);
+        break;
+      }
     }
   }
   g_btPendingNew = true;
@@ -394,18 +431,20 @@ static void btScanPoll() {
     e->used = true;
     g_btDevCount++;
   }
-  e->hits++;
+  if (!incoming.nameOnly) {
+    e->hits++;
+    e->rssi = incoming.rssi;
+    e->cod = incoming.cod;
+  }
   e->lastSeen = millis();
   if (incoming.name[0]) memcpy(e->name, incoming.name, sizeof(e->name));
-  e->rssi = incoming.rssi;
-  e->cod = incoming.cod;
 
   char mac[18];
   macToStr(e->mac, mac);
   JsonDocument d;
   d["type"] = "bt_device";
   d["addr"] = mac;
-  if (e->name[0]) d["name"] = e->name;
+  d["name"] = e->name;
   d["rssi"] = e->rssi;
   d["cod"] = e->cod;
   d["hits"] = e->hits;
@@ -1149,7 +1188,10 @@ static void handleLine(const char *line) {
     g_btRunning = false;
     g_btDiscoveryActive = false;
     g_btConnected = false;
-    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) g_btDevs[i] = BtDev();
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
+      g_btDevs[i] = BtDev();
+      g_btNameAsked[i] = Target();
+    }
     g_btDevCount = 0;
     g_btEvict = 0;
     g_btAutoAdd = g_cfg.btAutoAdd;
