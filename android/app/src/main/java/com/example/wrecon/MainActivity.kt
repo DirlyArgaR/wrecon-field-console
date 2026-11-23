@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.IntentCompat
 import com.example.wrecon.ui.ScanScreen
 
@@ -50,7 +52,15 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            androidx.compose.material3.MaterialTheme {
+            androidx.compose.material3.MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = Color(0xFF5CE1C6),
+                    onPrimary = Color(0xFF0A0D0E),
+                    secondary = Color(0xFFFF5F56),
+                    surface = Color(0xFF101617),
+                    background = Color(0xFF0A0D0E),
+                )
+            ) {
                 ScanScreen(vm = vm, onConnect = { connectFirstAvailable() })
             }
         }

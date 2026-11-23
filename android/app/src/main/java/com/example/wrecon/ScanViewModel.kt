@@ -13,10 +13,10 @@ import kotlinx.coroutines.launch
 
 data class UiState(
     val link: LinkState = LinkState.Disconnected,
-    val cfg: DeviceConfig = DeviceConfig(),
+    val cfg: JamConfig = JamConfig(),
     val wifi: List<WifiAp> = emptyList(),
-    val ble: List<BleDev> = emptyList(),
-    val status: Msg.Status? = null,
+    val clients: List<ClientDev> = emptyList(),
+    val stats: JamStats = JamStats(),
     val fw: String = "-",
     val chip: String = "-",
     val logs: List<String> = emptyList(),
@@ -32,11 +32,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private val wifiMap = LinkedHashMap<String, WifiAp>()
-    private val bleMap = LinkedHashMap<String, BleDev>()
+    private val clientMap = LinkedHashMap<String, ClientDev>()
 
     init {
         viewModelScope.launch {
-            link.lines.collect { line -> onLine(line) }
+            link.lines.collect { onLine(it) }
         }
         viewModelScope.launch {
             link.state.collect { st -> _ui.update { it.copy(link = st) } }
@@ -46,34 +46,53 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun devices(): List<UsbSerialDriver> = link.devices()
     fun hasPermission(device: UsbDevice) = link.hasPermission(device)
     fun requestPermission(device: UsbDevice) = link.requestPermission(device)
+
     fun open(driver: UsbSerialDriver) {
         link.open(driver)
-        send(Protocol.status())   // minta config + status terbaru setelah connect
+        send(Protocol.status())
+        send(Protocol.config())
     }
+
     fun disconnect() = link.close()
 
-    fun setMode(mode: String) {
-        _ui.update { it.copy(cfg = it.cfg.copy(mode = mode)) }
-        send(Protocol.mode(mode))
+    fun refresh() {
+        send(Protocol.status())
+        send(Protocol.config())
     }
 
-    fun updateParams(block: (DeviceConfig) -> DeviceConfig) {
+    fun toggleTarget(bssid: String) {
+        val next = _ui.value.cfg.targets.toMutableSet()
+        if (!next.add(bssid)) next.remove(bssid)
+        setTargets(next)
+    }
+
+    fun selectAllVisible() {
+        val all = (_ui.value.cfg.targets + wifiMap.keys).toSet()
+        setTargets(all)
+    }
+
+    fun clearTargets() = setTargets(emptySet())
+
+    private fun setTargets(set: Set<String>) {
+        val list = set.toList().sorted()
+        _ui.update { it.copy(cfg = it.cfg.copy(targets = list)) }
+        send(Protocol.targets(list))
+    }
+
+    fun startJam() = send(Protocol.jamStart())
+    fun stopJam() = send(Protocol.jamStop())
+
+    fun updateParams(block: (JamConfig) -> JamConfig) {
         val next = block(_ui.value.cfg)
         _ui.update { it.copy(cfg = next) }
         send(Protocol.setParams(next))
     }
 
-    fun toggleChannel(ch: Int) {
-        updateParams { c ->
-            c.copy(channels = if (ch in c.channels) c.channels - ch else c.channels + ch)
-        }
-    }
-
-    fun refresh() = send(Protocol.status())
-    fun clear() {
+    fun clearScan() {
         wifiMap.clear()
-        bleMap.clear()
-        _ui.update { it.copy(wifi = emptyList(), ble = emptyList()) }
+        clientMap.clear()
+        _ui.update { it.copy(wifi = emptyList(), clients = emptyList()) }
+        send(Protocol.clear())
     }
 
     fun selectTab(tab: Int) = _ui.update { it.copy(tab = tab) }
@@ -83,29 +102,23 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun log(s: String) {
-        _ui.update { it.copy(logs = (listOf(s) + it.logs).take(6)) }
+        _ui.update { it.copy(logs = (listOf(s) + it.logs).take(5)) }
     }
 
     private fun onLine(line: String) {
         when (val msg = Protocol.parse(line)) {
             is Msg.Hello -> _ui.update { it.copy(fw = msg.fw, chip = msg.chip) }
-
             is Msg.Config -> _ui.update { it.copy(cfg = msg.cfg) }
-
             is Msg.Rsp -> if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
-
-            is Msg.Status -> _ui.update { it.copy(status = msg) }
-
+            is Msg.Status -> _ui.update { it.copy(stats = msg.stats) }
             is Msg.Wifi -> {
                 wifiMap[msg.ap.bssid] = msg.ap
-                _ui.update { it.copy(wifi = wifiMap.values.sortedByDescending { ap -> ap.rssi }) }
+                _ui.update { it.copy(wifi = wifiMap.values.sortedByDescending { a -> a.rssi }) }
             }
-
-            is Msg.Ble -> {
-                bleMap[msg.dev.addr] = msg.dev
-                _ui.update { it.copy(ble = bleMap.values.sortedByDescending { d -> d.rssi }) }
+            is Msg.Client -> {
+                clientMap[msg.dev.addr] = msg.dev
+                _ui.update { it.copy(clients = clientMap.values.sortedByDescending { c -> c.rssi }) }
             }
-
             null -> Unit
         }
     }

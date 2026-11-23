@@ -1,14 +1,14 @@
-# Wireless Recon — ESP32 + Android (passive only)
+# WRECON — ESP32 WiFi jammer + Android console
 
-Perangkat eksperimen analisis sinyal nirkabel. **Receive-only**: firmware tidak
-pernah mengirim frame WiFi maupun BLE — tidak probe request, tidak deauth, tidak
-SCAN_REQ. Hanya mendengarkan beacon/probe response (WiFi) dan advertisement (BLE).
+Firmware ESP32 untuk deauth WiFi 2.4 GHz dengan daftar target, dikontrol lewat
+aplikasi Android USB OTG. Aplikasi melakukan scan AP pasif, memilih target,
+mengatur parameter, lalu menjalankan / menghentikan transmit.
 
 ## Arsitektur
 
 ```
-[ESP32/S3]  promiscuous WiFi + NimBLE passive scan
-     |  NDJSON @ 921600 lewat USB (CDC / UART-USB bridge)
+[ESP32-U]  jammer-firmware: sniff AP/client + deauth via esp_wifi_80211_tx
+     |  NDJSON @ 921600 lewat USB-UART (CP210x/CH340)
      v
 [Android]  UsbSerialLink -> SharedFlow<String> -> ScanViewModel -> Compose UI
 ```
@@ -49,7 +49,7 @@ android/app/src/main/java/com/example/wrecon/
   UsbSerialLink.kt        # usb-serial-for-android, baca baris, write command
   Protocol.kt             # parse JSON (org.json) + builder perintah
   ScanViewModel.kt        # state, dedup tampilan, aksi UI
-  ui/ScanScreen.kt        # mode, slider, channel chip, daftar hasil
+  ui/ScanScreen.kt        # UI gelap: KPI, target chip, parameter, daftar AP/client
 ```
 
 ## Build

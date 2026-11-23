@@ -4,9 +4,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /*
- * Protokol NDJSON. Satu baris = satu objek JSON.
- * Device -> app : type = hello | config | rsp | status | wifi | ble
- * App -> device : cmd  = mode | set | status | ping | reset
+ * Protokol NDJSON firmware jammer-firmware (ESP32).
+ * Device -> app : hello | config | rsp | status | wifi | client
+ * App -> device : status | config | set | targets | jam_start | jam_stop | clear | reset
  */
 
 data class WifiAp(
@@ -20,95 +20,99 @@ data class WifiAp(
     val ts: Long,
 )
 
-data class BleDev(
+data class ClientDev(
     val addr: String,
-    val addrType: String,
-    val name: String,
+    val bssid: String,
+    val ch: Int,
     val rssi: Int,
-    val connectable: Boolean,
     val hits: Int,
     val ts: Long,
 )
 
-data class DeviceConfig(
-    val mode: String = "off",
-    val wifiDwellMs: Int = 400,
-    val bleScanMs: Int = 1000,
-    val bleIntervalMs: Int = 200,
-    val bleWindowMs: Int = 60,
-    val repeatMs: Int = 2000,
-    val dedupMs: Int = 60000,
-    val statsMs: Int = 5000,
+data class JamConfig(
+    val intervalMs: Int = 5,
+    val burst: Int = 8,
+    val burstGapMs: Int = 30,
+    val channel: Int = 6,
+    val hop: Boolean = false,
+    val hopMs: Int = 200,
+    val reason: Int = 7,
+    val broadcast: Boolean = true,
+    val disassoc: Boolean = false,
+    val statsMs: Int = 2000,
+    val repeatMs: Int = 1500,
     val rssiMin: Int = -95,
-    val channels: List<Int> = (1..13).toList(),
+    val targets: List<String> = emptyList(),
+)
+
+data class JamStats(
+    val frames: Int = 0,
+    val aps: Int = 0,
+    val clients: Int = 0,
+    val tx: Int = 0,
+    val txErrors: Int = 0,
+    val dropped: Int = 0,
+    val channel: Int = 0,
+    val targets: Int = 0,
+    val jamming: Boolean = false,
 )
 
 sealed class Msg {
     data class Hello(val fw: String, val chip: String) : Msg()
-    data class Config(val cfg: DeviceConfig) : Msg()
+    data class Config(val cfg: JamConfig) : Msg()
     data class Rsp(val ok: Boolean, val cmd: String, val msg: String) : Msg()
-    data class Status(
-        val mode: String,
-        val running: Boolean,
-        val wifiFrames: Int,
-        val wifiUnique: Int,
-        val bleEvents: Int,
-        val bleUnique: Int,
-        val dropped: Int,
-        val channel: Int,
-    ) : Msg()
+    data class Status(val stats: JamStats) : Msg()
     data class Wifi(val ap: WifiAp) : Msg()
-    data class Ble(val dev: BleDev) : Msg()
+    data class Client(val dev: ClientDev) : Msg()
 }
 
 object Protocol {
     fun parse(line: String): Msg? = try {
         val o = JSONObject(line)
         when (o.optString("type")) {
-            "hello" -> Msg.Hello(
-                o.optString("fw", "?"),
-                o.optString("chip", "?"),
-            )
+            "hello" -> Msg.Hello(o.optString("fw", "?"), o.optString("chip", "?"))
 
             "config" -> {
                 val p = o.optJSONObject("params") ?: JSONObject()
-                val ch = p.optJSONArray("channels")
-                val channels = buildList {
-                    if (ch != null) for (i in 0 until ch.length()) add(ch.getInt(i))
+                val arr = o.optJSONArray("targets")
+                val targets = buildList {
+                    if (arr != null) for (i in 0 until arr.length()) add(arr.optString(i))
                 }
                 Msg.Config(
-                    DeviceConfig(
-                        mode = o.optString("mode", "off"),
-                        wifiDwellMs = p.optInt("wifi_dwell_ms", 400),
-                        bleScanMs = p.optInt("ble_scan_ms", 1000),
-                        bleIntervalMs = p.optInt("ble_interval_ms", 200),
-                        bleWindowMs = p.optInt("ble_window_ms", 60),
-                        repeatMs = p.optInt("repeat_ms", 2000),
-                        dedupMs = p.optInt("dedup_ms", 60000),
-                        statsMs = p.optInt("stats_ms", 5000),
+                    JamConfig(
+                        intervalMs = p.optInt("interval_ms", 5),
+                        burst = p.optInt("burst", 8),
+                        burstGapMs = p.optInt("burst_gap_ms", 30),
+                        channel = p.optInt("channel", 6),
+                        hop = p.optBoolean("hop"),
+                        hopMs = p.optInt("hop_ms", 200),
+                        reason = p.optInt("reason", 7),
+                        broadcast = p.optBoolean("broadcast", true),
+                        disassoc = p.optBoolean("disassoc"),
+                        statsMs = p.optInt("stats_ms", 2000),
+                        repeatMs = p.optInt("repeat_ms", 1500),
                         rssiMin = p.optInt("rssi_min", -95),
-                        channels = channels.ifEmpty { (1..13).toList() },
+                        targets = targets,
                     )
                 )
             }
 
-            "rsp" -> Msg.Rsp(
-                o.optBoolean("ok"),
-                o.optString("cmd"),
-                o.optString("msg"),
-            )
+            "rsp" -> Msg.Rsp(o.optBoolean("ok"), o.optString("cmd"), o.optString("msg"))
 
             "status" -> {
                 val s = o.optJSONObject("stats") ?: JSONObject()
                 Msg.Status(
-                    mode = o.optString("mode", "off"),
-                    running = o.optBoolean("running"),
-                    wifiFrames = s.optInt("wifi_frames"),
-                    wifiUnique = s.optInt("wifi_unique"),
-                    bleEvents = s.optInt("ble_events"),
-                    bleUnique = s.optInt("ble_unique"),
-                    dropped = s.optInt("tx_dropped"),
-                    channel = o.optInt("wifi_channel", 0),
+                    JamStats(
+                        frames = s.optInt("frames"),
+                        aps = s.optInt("aps"),
+                        clients = s.optInt("clients"),
+                        tx = s.optInt("tx"),
+                        txErrors = s.optInt("tx_errors"),
+                        dropped = s.optInt("rx_dropped"),
+                        channel = o.optInt("channel"),
+                        targets = o.optInt("targets"),
+                        jamming = o.optBoolean("jamming"),
+                    )
                 )
             }
 
@@ -125,13 +129,12 @@ object Protocol {
                 )
             )
 
-            "ble" -> Msg.Ble(
-                BleDev(
+            "client" -> Msg.Client(
+                ClientDev(
                     addr = o.optString("addr"),
-                    addrType = o.optString("addr_type", "public"),
-                    name = o.optString("name", "(no name)"),
+                    bssid = o.optString("bssid"),
+                    ch = o.optInt("ch"),
                     rssi = o.optInt("rssi"),
-                    connectable = o.optBoolean("conn"),
                     hits = o.optInt("hits", 1),
                     ts = o.optLong("ts"),
                 )
@@ -143,26 +146,35 @@ object Protocol {
         null
     }
 
-    fun mode(mode: String): String = JSONObject()
-        .put("cmd", "mode")
-        .put("mode", mode)
+    fun status(): String = cmd("status")
+    fun config(): String = cmd("config")
+    fun jamStart(): String = cmd("jam_start")
+    fun jamStop(): String = cmd("jam_stop")
+    fun clear(): String = cmd("clear")
+    fun reset(): String = cmd("reset")
+    fun ping(): String = cmd("ping")
+
+    fun targets(list: Collection<String>): String = JSONObject()
+        .put("cmd", "targets")
+        .put("targets", JSONArray(list))
         .toString()
 
-    fun setParams(cfg: DeviceConfig): String {
-        val params = JSONObject()
-            .put("wifi_dwell_ms", cfg.wifiDwellMs)
-            .put("ble_scan_ms", cfg.bleScanMs)
-            .put("ble_interval_ms", cfg.bleIntervalMs)
-            .put("ble_window_ms", cfg.bleWindowMs)
-            .put("repeat_ms", cfg.repeatMs)
-            .put("dedup_ms", cfg.dedupMs)
+    fun setParams(cfg: JamConfig): String {
+        val p = JSONObject()
+            .put("interval_ms", cfg.intervalMs)
+            .put("burst", cfg.burst)
+            .put("burst_gap_ms", cfg.burstGapMs)
+            .put("channel", cfg.channel)
+            .put("hop", cfg.hop)
+            .put("hop_ms", cfg.hopMs)
+            .put("reason", cfg.reason)
+            .put("broadcast", cfg.broadcast)
+            .put("disassoc", cfg.disassoc)
             .put("stats_ms", cfg.statsMs)
+            .put("repeat_ms", cfg.repeatMs)
             .put("rssi_min", cfg.rssiMin)
-            .put("channels", JSONArray(cfg.channels))
-        return JSONObject().put("cmd", "set").put("params", params).toString()
+        return JSONObject().put("cmd", "set").put("params", p).toString()
     }
 
-    fun status(): String = JSONObject().put("cmd", "status").toString()
-    fun ping(): String = JSONObject().put("cmd", "ping").toString()
-    fun reset(): String = JSONObject().put("cmd", "reset").toString()
+    private fun cmd(name: String): String = JSONObject().put("cmd", name).toString()
 }
