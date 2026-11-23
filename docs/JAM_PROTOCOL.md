@@ -22,7 +22,6 @@ perintah TX tambahan. Firmware: `jammer-firmware/`.
   "reason":7,                    // 1..25, deauth reason code
   "broadcast":true,              // true = deauth ke broadcast per BSSID
   "disassoc":false,              // true = subtype disassoc (0xA0)
-  "ap_interface":true,           // true = WIFI_IF_AP, false = WIFI_IF_STA
   "stats_ms":2000,               // 0 = matikan status periodik
   "repeat_ms":1500,              // 0 = kirim hanya saat ada perubahan
   "rssi_min":-95                 // -120..0
@@ -71,3 +70,12 @@ BSSID-nya diketahui.
 
 TX hanya berjalan untuk BSSID yang ada di `targets`. Daftar itu bisa dikirim
 langsung lewat web, tapi tetap berada di firmware — bukan sekadar filter UI.
+
+Firmware memakai `WIFI_IF_STA` tanpa asosiasi dan `en_sys_seq=false`. SoftAP
+sengaja tidak dinyalakan: dengan AP aktif, driver menolak frame yang `addr2`-nya
+bukan MAC AP interface (`ESP_ERR_INVALID_ARG` 258).
+
+Pada IDF 4.4 / Arduino core 2.x, driver juga memvalidasi `addr2` untuk frame
+management. `src/bypass.S` masuk ke `esp_wifi_80211_tx` setelah validasi itu
+(offset `+0x19`) supaya BSSID spoof benar-benar dikirim. Tanpa wrapper ini,
+status menampilkan `tx_errors` dan `tx_last_err: 258`.

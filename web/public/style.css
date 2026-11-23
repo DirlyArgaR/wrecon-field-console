@@ -57,6 +57,18 @@ button.ghost { background: transparent; }
 button.small { padding: 3px 8px; font-size: 11px; }
 button.danger { border-color: var(--danger); color: var(--danger); }
 button.danger:hover { background: var(--danger); color: #0a0d0e; }
+button:disabled { opacity: .35; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
+button:disabled:hover { background: transparent; color: var(--muted); }
+
+.fw-note {
+  margin: 10px 18px 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: .08em;
+}
+.fw-note.warn { border-color: var(--warn); color: var(--warn); }
 
 main {
   display: grid;

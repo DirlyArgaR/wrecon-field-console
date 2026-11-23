@@ -110,8 +110,9 @@ function handleMsg(msg) {
       break;
     case 'config':
       snap.config = msg;
-      snap.targets = Array.isArray(msg.targets) ? msg.targets : [];
-      snap.clientTargets = Array.isArray(msg.client_targets) ? msg.client_targets : [];
+      // Firmware pasif tidak mengirim field ini — jangan timpa target lokal.
+      if (Array.isArray(msg.targets)) snap.targets = msg.targets;
+      if (Array.isArray(msg.client_targets)) snap.clientTargets = msg.client_targets;
       break;
     case 'status':
       snap.status = msg;
@@ -156,12 +157,27 @@ function renderConfigFromSnap() {
   if (p.hop !== undefined) $('cfg-hop').checked = !!p.hop;
   if (p.broadcast !== undefined) $('cfg-broadcast').checked = !!p.broadcast;
   if (p.disassoc !== undefined) $('cfg-disassoc').checked = !!p.disassoc;
-  if (p.ap_interface !== undefined) $('cfg-apif').checked = !!p.ap_interface;
+}
+
+function isJammerFirmware() {
+  const params = (snap.config && snap.config.params) || {};
+  return (snap.info && Number(snap.info.proto) >= 2) ||
+    Object.prototype.hasOwnProperty.call(params, 'interval_ms');
 }
 
 function renderConn() {
   $('conn-dot').classList.toggle('on', !!snap.connected);
   $('conn-label').textContent = snap.connected ? 'CONNECTED' : 'OFFLINE';
+
+  const jammer = isJammerFirmware();
+  const note = $('fw-note');
+  note.textContent = jammer
+    ? 'JAMMER FIRMWARE AKTIF — TX siap'
+    : 'FIRMWARE PASIF TERDETEKSI — flash jammer-firmware untuk deauth';
+  note.classList.toggle('warn', !jammer);
+  $('btn-start').disabled = !jammer;
+  $('btn-stop').disabled = !jammer;
+  $('btn-apply').disabled = !jammer;
 }
 
 function renderTables() {
@@ -264,7 +280,6 @@ function applyParams() {
     hop: $('cfg-hop').checked,
     broadcast: $('cfg-broadcast').checked,
     disassoc: $('cfg-disassoc').checked,
-    ap_interface: $('cfg-apif').checked,
   };
   send({ cmd: 'set', params });
 }
