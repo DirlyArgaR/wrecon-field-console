@@ -98,7 +98,8 @@ class UsbSerialLink(private val ctx: Context) {
     fun send(line: String): Boolean {
         return try {
             val p = port ?: return false
-            p.write((line + "\n").toByteArray(Charsets.US_ASCII), 500) >= 0
+            p.write((line + "\n").toByteArray(Charsets.US_ASCII), 500)
+            true
         } catch (_: Exception) {
             false
         }
