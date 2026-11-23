@@ -73,6 +73,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearTargets() = setTargets(emptySet())
 
+    fun addTargetMac(mac: String) {
+        val clean = mac.trim().uppercase()
+        if (!Regex("^([0-9A-F]{2}:){5}[0-9A-F]{2}$").matches(clean)) {
+            log("MAC tidak valid")
+            return
+        }
+        setTargets((_ui.value.cfg.targets + clean).toSet())
+    }
+
     private fun setTargets(set: Set<String>) {
         val list = set.toList().sorted()
         _ui.update { it.copy(cfg = it.cfg.copy(targets = list)) }

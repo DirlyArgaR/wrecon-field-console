@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -35,6 +37,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,67 +86,73 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
             )
         }
     ) { pad ->
-        Column(
-            Modifier.padding(pad).padding(12.dp).fillMaxSize(),
+        // Satu LazyColumn penuh: semua panel ikut tergulir, jadi daftar target
+        // tidak pernah dapat tinggi 0 dan seluruh UI bisa di-scroll.
+        LazyColumn(
+            modifier = Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatusCard(link, s.fw, s.chip, s.stats)
+            item { StatusCard(link, s.fw, s.chip, s.stats) }
+            item { StatsRow(s.stats) }
 
-            StatsRow(s.stats)
+            item {
+                TargetCard(
+                    targets = s.cfg.targets,
+                    onRemove = { vm.toggleTarget(it) },
+                    onSelectAll = { vm.selectAllVisible() },
+                    onClear = { vm.clearTargets() },
+                    onAdd = { vm.addTargetMac(it) },
+                )
+            }
 
-            TargetCard(
-                targets = s.cfg.targets,
-                onRemove = { vm.toggleTarget(it) },
-                onSelectAll = { vm.selectAllVisible() },
-                onClear = { vm.clearTargets() },
-            )
+            item {
+                ConfigCard(
+                    cfg = s.cfg,
+                    chScroll = chScroll,
+                    onChannel = { ch -> vm.updateParams { it.copy(channel = ch) } },
+                    onInterval = { v -> vm.updateParams { it.copy(intervalMs = v) } },
+                    onBurst = { v -> vm.updateParams { it.copy(burst = v) } },
+                    onGap = { v -> vm.updateParams { it.copy(burstGapMs = v) } },
+                    onReason = { v -> vm.updateParams { it.copy(reason = v) } },
+                    onHop = { v -> vm.updateParams { it.copy(hop = v) } },
+                    onBroadcast = { v -> vm.updateParams { it.copy(broadcast = v) } },
+                    onDisassoc = { v -> vm.updateParams { it.copy(disassoc = v) } },
+                )
+            }
 
-            ConfigCard(
-                cfg = s.cfg,
-                chScroll = chScroll,
-                onChannel = { ch -> vm.updateParams { it.copy(channel = ch) } },
-                onInterval = { v -> vm.updateParams { it.copy(intervalMs = v) } },
-                onBurst = { v -> vm.updateParams { it.copy(burst = v) } },
-                onGap = { v -> vm.updateParams { it.copy(burstGapMs = v) } },
-                onReason = { v -> vm.updateParams { it.copy(reason = v) } },
-                onHop = { v -> vm.updateParams { it.copy(hop = v) } },
-                onBroadcast = { v -> vm.updateParams { it.copy(broadcast = v) } },
-                onDisassoc = { v -> vm.updateParams { it.copy(disassoc = v) } },
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { vm.startJam() },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Danger),
-                ) { Text("START DEAUTH") }
-                OutlinedButton(
-                    onClick = { vm.stopJam() },
-                    modifier = Modifier.weight(1f),
-                ) { Text("STOP") }
-                OutlinedButton(onClick = { vm.clearScan() }) { Text("CLEAR") }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.startJam() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                    ) { Text("START DEAUTH") }
+                    OutlinedButton(
+                        onClick = { vm.stopJam() },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("STOP") }
+                    OutlinedButton(onClick = { vm.clearScan() }) { Text("CLEAR") }
+                }
             }
 
             if (s.logs.isNotEmpty()) {
-                Text(s.logs.first(), color = Danger, fontSize = 11.sp)
+                item { Text(s.logs.first(), color = Danger, fontSize = 11.sp) }
             }
 
-            TabRow(selectedTabIndex = s.tab) {
-                Tab(s.tab == 0, { vm.selectTab(0) }, text = { Text("ACCESS POINTS") })
-                Tab(s.tab == 1, { vm.selectTab(1) }, text = { Text("CLIENTS") })
-            }
-
-            LazyColumn(
-                Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (s.tab == 0) {
-                    items(s.wifi, key = { it.bssid }) { ap ->
-                        ApRow(ap, ap.bssid in s.cfg.targets) { vm.toggleTarget(ap.bssid) }
-                    }
-                } else {
-                    items(s.clients, key = { it.addr }) { c -> ClientRow(c) }
+            item {
+                TabRow(selectedTabIndex = s.tab) {
+                    Tab(s.tab == 0, { vm.selectTab(0) }, text = { Text("ACCESS POINTS") })
+                    Tab(s.tab == 1, { vm.selectTab(1) }, text = { Text("CLIENTS") })
                 }
+            }
+
+            if (s.tab == 0) {
+                items(s.wifi, key = { it.bssid }) { ap ->
+                    ApRow(ap, ap.bssid in s.cfg.targets) { vm.toggleTarget(ap.bssid) }
+                }
+            } else {
+                items(s.clients, key = { it.addr }) { c -> ClientRow(c) }
             }
         }
     }
@@ -220,7 +230,9 @@ private fun TargetCard(
     onRemove: (String) -> Unit,
     onSelectAll: () -> Unit,
     onClear: () -> Unit,
+    onAdd: (String) -> Unit,
 ) {
+    var manual by remember { mutableStateOf("") }
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(10.dp)) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,6 +264,18 @@ private fun TargetCard(
                         )
                     }
                 }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = manual,
+                    onValueChange = { manual = it },
+                    placeholder = { Text("AA:BB:CC:DD:EE:FF", fontSize = 10.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                Button(onClick = { onAdd(manual); manual = "" }) { Text("ADD") }
             }
         }
     }
