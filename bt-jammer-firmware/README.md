@@ -8,6 +8,7 @@ perintah, tanpa web, tanpa WiFi.
 - **BLE advertising flood** — payload vendor + random bergantian, MAC acak setiap burst.
 - **BR/EDR inquiry flood** — general inquiry berulang, menemukan perangkat discoverable.
 - **Auto connect/disconnect** — perangkat hasil inquiry disambung sebentar lalu diputus, bergilir.
+- BLE flood dijeda saat inquiry supaya radio penuh untuk discovery, lalu aktif lagi saat fase connect.
 - Status NDJSON tiap 2 detik di `921600` untuk debugging.
 
 ## Build / flash

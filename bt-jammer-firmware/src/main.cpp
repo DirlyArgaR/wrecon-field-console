@@ -55,6 +55,7 @@ static uint32_t bleStart = 0;
 static uint32_t bleSent = 0;
 static uint32_t bleErrors = 0;
 static uint8_t  bleCursor = 0;
+static bool     blePaused = false;
 
 struct BtDevice {
   bool used;
@@ -79,6 +80,7 @@ enum BtState : uint8_t {
 };
 static BtState  btState = BT_INQUIRY;
 static uint32_t btStateStart = 0;
+static uint32_t btConnectPhaseStart = 0;
 static uint8_t  btCursor = 0;
 static uint8_t  btConnectIndex = 0;
 static uint32_t btInquiryCount = 0;
@@ -151,6 +153,23 @@ static void bleTick() {
   }
   bleEmit(data, len);
   bleSent++;
+}
+
+static void blePause() {
+  if (!blePaused) {
+    if (bleActive) {
+      esp_ble_gap_stop_advertising();
+      bleActive = false;
+    }
+    blePaused = true;
+  }
+}
+
+static void bleResume() {
+  if (blePaused) {
+    blePaused = false;
+    bleLast = millis();
+  }
 }
 
 /* ---- BT Classic -------------------------------------------------------- */
@@ -245,12 +264,23 @@ static void btTick() {
         btRestartInquiry = false;
         btState = BT_CONNECT;
         btStateStart = now;
+        btConnectPhaseStart = now;
         btConnectIndex = 0;
+        bleResume();
       }
       break;
 
     case BT_CONNECT: {
 #if BT_CONNECT_ENABLE
+      // Kalau semua percobaan koneksi gagal, jangan mengunci radio di sini —
+      // kembali ke inquiry supaya perangkat baru tetap bisa ditemukan.
+      if ((uint32_t)(now - btConnectPhaseStart) >= 3000) {
+        btState = BT_INQUIRY;
+        btStateStart = now;
+        blePause();
+        btStartInquiry();
+        break;
+      }
       if ((uint32_t)(now - btStateStart) < BT_CONNECT_GAP_MS) break;
       uint8_t addr[6];
       bool have = false;
@@ -295,6 +325,7 @@ static void btTick() {
       if ((uint32_t)(now - btStateStart) >= BT_CONNECT_GAP_MS) {
         btState = BT_INQUIRY;
         btStateStart = now;
+        blePause();
         btStartInquiry();
       }
       break;
@@ -316,11 +347,12 @@ void setup() {
   btInit();
   delay(500);
   btStateStart = millis();
+  blePause();
   btStartInquiry();
 }
 
 void loop() {
-  bleTick();
+  if (!blePaused) bleTick();
   btTick();
 
   if ((uint32_t)(millis() - lastStatus) >= STATUS_MS) {
@@ -330,6 +362,7 @@ void loop() {
     d["fw"] = "bt-jammer-1.0.0";
     d["ble_sent"] = bleSent;
     d["ble_errors"] = bleErrors;
+    d["ble_paused"] = blePaused;
     d["inquiry"] = btInquiryCount;
     d["connect"] = btConnectCount;
     d["connect_errors"] = btConnectErrors;
