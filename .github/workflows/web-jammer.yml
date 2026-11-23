@@ -77,7 +77,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
 
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
@@ -101,7 +100,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
 
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
