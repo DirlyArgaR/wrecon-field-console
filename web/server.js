@@ -24,6 +24,8 @@ const state = {
   stas: new Map(),
   targets: [],
   clientTargets: [],
+  btTargets: [],
+  btDevices: new Map(),
   log: [],
 };
 
@@ -34,7 +36,7 @@ const sseClients = new Set();
 const KNOWN = new Set([
   'ping', 'status', 'config', 'set', 'targets', 'clear',
   'jam_start', 'jam_stop', 'ble_start', 'ble_stop',
-  'bt_start', 'bt_stop', 'reset',
+  'bt_targets', 'bt_scan_start', 'bt_scan_stop', 'bt_start', 'bt_stop', 'reset',
   'mode', 'get_status', 'get_config', 'set_config',
   'scan_wifi', 'scan_ble', 'scan_all', 'stop', 'get_results',
 ]);
@@ -68,6 +70,7 @@ function snapshot() {
     targets: state.targets,
     clientTargets: state.clientTargets,
     btTargets: (state.config && state.config.bt_targets) || [],
+  btDevices: [...state.btDevices.values()],
     log: state.log.slice(-80),
   };
 }
@@ -94,6 +97,7 @@ function onLine(line) {
       state.info = msg;
       state.aps.clear();
       state.stas.clear();
+      state.btDevices.clear();
       break;
     case 'config':
       state.config = msg;
@@ -110,6 +114,9 @@ function onLine(line) {
     case 'client':
     case 'sta':
       state.stas.set(msg.addr || msg.a, msg);
+      break;
+    case 'bt_device':
+      state.btDevices.set(msg.addr, msg);
       break;
     case 'rsp':
       break;
@@ -144,6 +151,7 @@ async function disconnect() {
   state.config = null;
   state.aps.clear();
   state.stas.clear();
+  state.btDevices.clear();
   pushLog('sys', 'disconnected');
   emitSnapshot();
   return { connected: false };
@@ -190,6 +198,7 @@ async function connect(portPath, baudRate) {
   state.config = null;
   state.aps.clear();
   state.stas.clear();
+  state.btDevices.clear();
   pushLog('sys', `connected ${portPath} @ ${baudRate}`);
 
   writeCommand({ cmd: 'status' });

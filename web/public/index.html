@@ -7,161 +7,213 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
+  <header class="topbar">
     <div class="brand">WRECON <span>// FIELD CONSOLE</span></div>
     <div class="conn">
       <span class="dot" id="conn-dot"></span>
       <span class="conn-label" id="conn-label">OFFLINE</span>
       <select id="port" aria-label="Serial port"></select>
       <input id="baud" type="number" value="921600" aria-label="Baud rate">
-      <button id="btn-refresh-ports" class="ghost">PORTS</button>
-      <button id="btn-connect">CONNECT</button>
-      <button id="btn-disconnect" class="ghost">DISCONNECT</button>
+      <button id="btn-refresh-ports" class="ghost small">PORTS</button>
+      <button id="btn-connect" class="small">CONNECT</button>
+      <button id="btn-disconnect" class="ghost small">DISCONNECT</button>
     </div>
   </header>
 
   <div id="fw-note" class="fw-note"></div>
 
-  <main>
-    <section class="panel wide">
-      <div class="panel-head">
-        <span>SPECTRUM / DEVICES</span>
-        <button id="btn-clear" class="ghost small">CLEAR</button>
-      </div>
-      <div class="two-col">
-        <div>
+  <section class="kpis">
+    <div class="kpi"><span>STATE</span><strong id="st-jam">IDLE</strong></div>
+    <div class="kpi"><span>CHANNEL</span><strong id="st-ch">-</strong></div>
+    <div class="kpi"><span>WIFI RX</span><strong id="st-frames">0</strong></div>
+    <div class="kpi"><span>AP / CLIENT</span><strong id="st-unique">0 / 0</strong></div>
+    <div class="kpi"><span>DEAUTH TX</span><strong id="st-tx">0</strong></div>
+    <div class="kpi"><span>TX ERR</span><strong id="st-err">0</strong></div>
+    <div class="kpi"><span>DROPPED</span><strong id="st-drop">0</strong></div>
+    <div class="kpi"><span>BLE / BT</span><strong id="kpi-bt">0 / 0</strong></div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="wifi">01 &nbsp;WIFI / DEAUTH</button>
+    <button class="tab" data-tab="ble">02 &nbsp;BLUETOOTH LE</button>
+    <button class="tab" data-tab="bt">03 &nbsp;BLUETOOTH CLASSIC</button>
+    <button class="tab" data-tab="log">04 &nbsp;SERIAL LOG</button>
+  </nav>
+
+  <main class="viewport">
+
+    <!-- ================= WIFI ================= -->
+    <div class="tab-panel active" data-panel="wifi">
+      <section class="panel left">
+        <div class="panel-head"><span>SPECTRUM</span><button id="btn-clear" class="ghost small">CLEAR</button></div>
+        <div class="stack-scroll">
           <h3>ACCESS POINTS <span class="muted" id="ap-count">0</span></h3>
           <table id="ap-table">
             <thead><tr><th></th><th>BSSID</th><th>SSID</th><th>CH</th><th>RSSI</th><th>AUTH</th></tr></thead>
             <tbody></tbody>
           </table>
-        </div>
-        <div>
           <h3>CLIENTS <span class="muted" id="sta-count">0</span></h3>
           <table id="sta-table">
             <thead><tr><th></th><th>MAC</th><th>BSSID</th><th>CH</th><th>RSSI</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
-      </div>
-      <div class="row">
-        <button id="btn-select-all" class="ghost">SELECT ALL AP</button>
-        <button id="btn-add-selected">ADD SELECTED &rarr; TARGETS</button>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <span>TARGETS</span>
-        <span class="badge" id="target-count">0</span>
-      </div>
-      <div class="chips" id="target-chips"></div>
-      <div class="row">
-        <input id="manual-mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">
-        <button id="btn-add-manual" class="ghost">ADD MAC</button>
-      </div>
-      <p class="muted small-note">TX hanya ke BSSID yang masuk daftar ini.</p>
-    </section>
+      <section class="panel right">
+        <div class="panel-head"><span>TARGETS &amp; TRANSMIT</span><span class="badge" id="target-count">0</span></div>
+        <div class="scroll">
+          <div class="chips" id="target-chips"></div>
+          <div class="row">
+            <input id="manual-mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">
+            <button id="btn-add-manual" class="ghost small">ADD MAC</button>
+          </div>
+          <div class="row">
+            <button id="btn-select-all" class="ghost small">SELECT ALL AP</button>
+            <button id="btn-add-selected" class="small">ADD SELECTED &rarr;</button>
+          </div>
 
-    <section class="panel">
-      <div class="panel-head"><span>JAM PARAMETERS</span></div>
-      <div class="form-grid">
-        <label>CHANNEL<input id="cfg-channel" type="number" min="1" max="13" value="6"></label>
-        <label>INTERVAL MS<input id="cfg-interval" type="number" min="1" max="1000" value="5"></label>
-        <label>BURST<input id="cfg-burst" type="number" min="1" max="100" value="8"></label>
-        <label>BURST GAP MS<input id="cfg-gap" type="number" min="0" max="5000" value="30"></label>
-        <label>HOP MS<input id="cfg-hop-ms" type="number" min="10" max="5000" value="200"></label>
-        <label>REASON
-          <select id="cfg-reason">
-            <option value="1">1 — unspecified</option>
-            <option value="4">4 — inactive</option>
-            <option value="7" selected>7 — class 3 / non-associated</option>
-            <option value="8">8 — leaving ESS</option>
-          </select>
-        </label>
-        <label>RSSI MIN<input id="cfg-rssi" type="number" min="-120" max="0" value="-95"></label>
-        <label class="check"><input id="cfg-hop" type="checkbox"> HOP 1&ndash;13</label>
-        <label class="check"><input id="cfg-broadcast" type="checkbox" checked> BROADCAST</label>
-        <label class="check"><input id="cfg-disassoc" type="checkbox"> DISASSOC</label>
-      </div>
-      <button id="btn-apply">APPLY PARAMS</button>
-    </section>
+          <div class="divider">PARAMETER</div>
+          <div class="form-grid compact">
+            <label>CHANNEL<input id="cfg-channel" type="number" min="1" max="13" value="6"></label>
+            <label>INTERVAL MS<input id="cfg-interval" type="number" min="1" max="1000" value="5"></label>
+            <label>BURST<input id="cfg-burst" type="number" min="1" max="100" value="8"></label>
+            <label>GAP MS<input id="cfg-gap" type="number" min="0" max="5000" value="30"></label>
+            <label>HOP MS<input id="cfg-hop-ms" type="number" min="10" max="5000" value="200"></label>
+            <label>REASON
+              <select id="cfg-reason">
+                <option value="1">1 — unspecified</option>
+                <option value="4">4 — inactive</option>
+                <option value="7" selected>7 — class 3</option>
+                <option value="8">8 — leaving ESS</option>
+              </select>
+            </label>
+            <label>RSSI MIN<input id="cfg-rssi" type="number" min="-120" max="0" value="-95"></label>
+            <label class="check"><input id="cfg-hop" type="checkbox"> HOP</label>
+            <label class="check"><input id="cfg-broadcast" type="checkbox" checked> BROADCAST</label>
+            <label class="check"><input id="cfg-disassoc" type="checkbox"> DISASSOC</label>
+          </div>
+          <div class="row actions">
+            <button id="btn-apply" class="ghost small">APPLY</button>
+            <button id="btn-start" class="danger small">START DEAUTH</button>
+            <button id="btn-stop" class="ghost small">STOP</button>
+          </div>
+          <p class="hint">TX hanya ke BSSID yang masuk daftar target.</p>
+        </div>
+      </section>
+    </div>
 
-    <section class="panel">
-      <div class="panel-head"><span>TRANSMIT</span></div>
-      <div class="row">
-        <button id="btn-start" class="danger">START JAM</button>
-        <button id="btn-stop" class="ghost">STOP JAM</button>
-      </div>
-      <div class="stats">
-        <div><span>STATE</span><strong id="st-jam">IDLE</strong></div>
-        <div><span>CHANNEL</span><strong id="st-ch">-</strong></div>
-        <div><span>FRAMES RX</span><strong id="st-frames">0</strong></div>
-        <div><span>AP / CLIENT</span><strong id="st-unique">0 / 0</strong></div>
-        <div><span>TX SENT</span><strong id="st-tx">0</strong></div>
-        <div><span>TX ERR</span><strong id="st-err">0</strong></div>
-        <div><span>DROPPED</span><strong id="st-drop">0</strong></div>
-      </div>
-    </section>
+    <!-- ================= BLE ================= -->
+    <div class="tab-panel" data-panel="ble">
+      <section class="panel left">
+        <div class="panel-head"><span>BLE ADVERTISING</span></div>
+        <div class="scroll">
+          <div class="form-grid compact">
+            <label>MODE
+              <select id="ble-mode">
+                <option value="1">1 — vendor payload</option>
+                <option value="2">2 — random manufacturer</option>
+                <option value="3">3 — both</option>
+                <option value="4">4 — custom hex</option>
+              </select>
+            </label>
+            <label>ADV MS<input id="ble-adv-ms" type="number" min="5" max="1000" value="25"></label>
+            <label>BURST GAP MS<input id="ble-gap-ms" type="number" min="0" max="5000" value="10"></label>
+            <label>TX POWER<input id="ble-power" type="number" min="0" max="9" value="9"></label>
+          </div>
+          <label>CUSTOM PAYLOAD (HEX, MAKS 31 BYTE)
+            <input id="ble-custom" placeholder="1e ff 4c 00 ..." maxlength="93">
+          </label>
+          <div class="row actions">
+            <button id="btn-ble-start" class="danger small">BLE START</button>
+            <button id="btn-ble-stop" class="ghost small">BLE STOP</button>
+          </div>
+          <div class="mini-stats">
+            <div><span>STATE</span><strong id="ble-state">IDLE</strong></div>
+            <div><span>SENT</span><strong id="ble-sent">0</strong></div>
+            <div><span>ERRORS</span><strong id="ble-err">0</strong></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel right">
+        <div class="panel-head"><span>CATATAN MODE</span></div>
+        <div class="scroll notes">
+          <p><b>Vendor</b> — payload Apple / Samsung / Google / Swift, memicu popup pairing.</p>
+          <p><b>Random</b> — manufacturer data acak, murni saturasi airtime.</p>
+          <p><b>Both</b> — bergantian antara vendor dan random.</p>
+          <p><b>Custom</b> — isi hex sendiri lewat kolom payload.</p>
+          <p class="muted">BLE tidak punya deauth. Ini flood layer advertising.</p>
+        </div>
+      </section>
+    </div>
 
-    <section class="panel">
-      <div class="panel-head"><span>BLUETOOTH</span></div>
-      <div class="form-grid">
-        <label>MODE
-          <select id="ble-mode">
-            <option value="1">1 — vendor payload</option>
-            <option value="2">2 — random manufacturer</option>
-            <option value="3">3 — both</option>
-            <option value="4">4 — custom hex</option>
-          </select>
-        </label>
-        <label>ADV MS<input id="ble-adv-ms" type="number" min="5" max="1000" value="25"></label>
-        <label>BURST GAP MS<input id="ble-gap-ms" type="number" min="0" max="5000" value="10"></label>
-        <label>TX POWER<input id="ble-power" type="number" min="0" max="9" value="9"></label>
-      </div>
-      <div class="row"><input id="ble-custom" placeholder="1e ff 4c 00 ..." maxlength="93"></div>
-      <div class="row">
-        <button id="btn-ble-start" class="danger">BLE START</button>
-        <button id="btn-ble-stop" class="ghost">BLE STOP</button>
-      </div>
-      <div class="stats">
-        <div><span>STATE</span><strong id="ble-state">IDLE</strong></div>
-        <div><span>SENT</span><strong id="ble-sent">0</strong></div>
-        <div><span>ERRORS</span><strong id="ble-err">0</strong></div>
-      </div>
-    </section>
+    <!-- ================= BT CLASSIC ================= -->
+    <div class="tab-panel" data-panel="bt">
+      <section class="panel scan">
+        <div class="panel-head"><span>AUTO SCAN</span><span class="badge" id="bt-device-count">0</span></div>
+        <div class="scroll">
+          <div class="form-grid compact">
+            <label>SCAN DURATION MS<input id="bt-scan-ms" type="number" min="1000" max="60000" value="8000"></label>
+            <label class="check"><input id="bt-auto-add" type="checkbox"> AUTO ADD TARGET</label>
+          </div>
+          <div class="row actions">
+            <button id="btn-bt-scan" class="small">SCAN DEVICES</button>
+            <button id="btn-bt-scan-stop" class="ghost small">STOP SCAN</button>
+          </div>
+          <div class="mini-stats">
+            <div><span>SCAN</span><strong id="bt-scan-state">IDLE</strong></div>
+            <div><span>FOUND</span><strong id="bt-found">0</strong></div>
+          </div>
+          <div class="divider">HASIL SCAN — klik ADD</div>
+          <table id="bt-devices">
+            <thead><tr><th>NAME</th><th>MAC</th><th>RSSI</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
-    <section class="panel">
-      <div class="panel-head"><span>BLUETOOTH CLASSIC</span></div>
-      <div class="form-grid">
-        <label>MODE
-          <select id="bt-mode">
-            <option value="1">1 — inquiry flood</option>
-            <option value="2">2 — connect / disconnect</option>
-            <option value="3">3 — both</option>
-          </select>
-        </label>
-        <label>HOLD MS<input id="bt-hold-ms" type="number" min="50" max="10000" value="400"></label>
-        <label>GAP MS<input id="bt-gap-ms" type="number" min="0" max="5000" value="100"></label>
-      </div>
-      <div class="row"><input id="bt-mac" placeholder="BT MAC AA:BB:CC:DD:EE:FF" maxlength="17"></div>
-      <div class="chips" id="bt-target-chips"></div>
-      <div class="row">
-        <button id="btn-bt-add" class="ghost">ADD MAC</button>
-        <button id="btn-bt-start" class="danger">BT CLASSIC START</button>
-        <button id="btn-bt-stop" class="ghost">BT CLASSIC STOP</button>
-      </div>
-      <div class="stats">
-        <div><span>STATE</span><strong id="bt-state">IDLE</strong></div>
-        <div><span>SENT</span><strong id="bt-sent">0</strong></div>
-        <div><span>ERRORS</span><strong id="bt-err">0</strong></div>
-      </div>
-    </section>
+      <section class="panel right">
+        <div class="panel-head"><span>TARGET &amp; SERANGAN</span><span class="badge" id="bt-target-count">0</span></div>
+        <div class="scroll">
+          <div class="chips" id="bt-target-chips"></div>
+          <div class="row">
+            <input id="bt-mac" placeholder="BT MAC AA:BB:CC:DD:EE:FF" maxlength="17">
+            <button id="btn-bt-add" class="ghost small">ADD</button>
+          </div>
+          <div class="divider">PARAMETER</div>
+          <div class="form-grid compact">
+            <label>MODE
+              <select id="bt-mode">
+                <option value="1">1 — inquiry flood</option>
+                <option value="2">2 — connect / disconnect</option>
+                <option value="3">3 — both</option>
+              </select>
+            </label>
+            <label>HOLD MS<input id="bt-hold-ms" type="number" min="50" max="10000" value="400"></label>
+            <label>GAP MS<input id="bt-gap-ms" type="number" min="0" max="5000" value="100"></label>
+          </div>
+          <div class="row actions">
+            <button id="btn-bt-start" class="danger small">BT START</button>
+            <button id="btn-bt-stop" class="ghost small">BT STOP</button>
+          </div>
+          <div class="mini-stats">
+            <div><span>STATE</span><strong id="bt-state">IDLE</strong></div>
+            <div><span>SENT</span><strong id="bt-sent">0</strong></div>
+            <div><span>ERRORS</span><strong id="bt-err">0</strong></div>
+          </div>
+          <p class="hint">Mode 2 butuh MAC target yang mau disambung lalu diputus.</p>
+        </div>
+      </section>
+    </div>
 
-    <section class="panel wide">
-      <div class="panel-head"><span>SERIAL LOG</span></div>
-      <pre id="log"></pre>
-    </section>
+    <!-- ================= LOG ================= -->
+    <div class="tab-panel" data-panel="log">
+      <section class="panel wide">
+        <div class="panel-head"><span>SERIAL LOG</span><span class="muted">live NDJSON</span></div>
+        <pre id="log"></pre>
+      </section>
+    </div>
+
   </main>
 
   <script src="/app.js"></script>

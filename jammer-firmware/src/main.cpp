@@ -82,6 +82,8 @@ struct Config {
   uint8_t  btMode     = 1;      // 1 inquiry flood, 2 connect/disconnect, 3 both
   uint16_t btHoldMs   = 400;    // durasi inquiry / koneksi
   uint16_t btGapMs    = 100;    // jeda antar siklus
+  uint16_t btScanMs   = 8000;   // durasi auto scan
+  bool     btAutoAdd  = false;  // otomatis masukkan hasil scan ke target
 };
 
 struct ApEntry {
@@ -163,6 +165,26 @@ static uint32_t g_btErrors = 0;
 static uint8_t  g_btCursor = 0;
 static Target   g_btTargets[MAX_TARGETS];
 static BluetoothSerial *g_btSerial = nullptr;
+
+struct BtDev {
+  bool     used = false;
+  uint8_t  mac[6];
+  char     name[40];
+  int8_t   rssi = -127;
+  uint32_t cod = 0;
+  uint16_t hits = 0;
+  uint32_t lastSeen = 0;
+};
+#define MAX_BT_DEVS 48
+static BtDev   g_btDevs[MAX_BT_DEVS];
+static uint16_t g_btDevCount = 0;
+static BtDev   g_btPending;
+static volatile bool g_btPendingNew = false;
+static bool     g_btScanning = false;
+static bool     g_btAutoAdd = false;
+static uint32_t g_btScanStarted = 0;
+static uint32_t g_btScanMs = 8000;
+static uint16_t g_btEvict = 0;
 static uint32_t g_sniffFrames = 0;
 static uint32_t g_rxDrops = 0;
 static uint32_t g_ringDrops = 0;
@@ -177,6 +199,8 @@ static void sendJson(JsonDocument &d) {
   serializeJson(d, Serial);
   Serial.write('\n');
 }
+
+static void emitConfig();
 
 static void ack(bool ok, const char *msg, const char *cmd) {
   JsonDocument d;
@@ -323,11 +347,98 @@ static void bleTick() {
 
 /* ---- Bluetooth Classic (BR/EDR) ---------------------------------------- */
 
+static void btGapCb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+  if (event != ESP_BT_GAP_DISC_RES_EVT || g_btPendingNew) return;
+  memset(&g_btPending, 0, sizeof(g_btPending));
+  memcpy(g_btPending.mac, param->disc_res.bda, 6);
+  g_btPending.rssi = -127;
+  for (int i = 0; i < param->disc_res.num_prop; i++) {
+    esp_bt_gap_dev_prop_t &p = param->disc_res.prop[i];
+    if (p.type == ESP_BT_GAP_DEV_PROP_BDNAME && p.val && p.len > 0) {
+      uint8_t n = (uint8_t)min(p.len, (int)sizeof(g_btPending.name) - 1);
+      memcpy(g_btPending.name, p.val, n);
+      g_btPending.name[n] = 0;
+    } else if (p.type == ESP_BT_GAP_DEV_PROP_RSSI && p.val && p.len >= 1) {
+      g_btPending.rssi = ((int8_t *)p.val)[0];
+    } else if (p.type == ESP_BT_GAP_DEV_PROP_COD && p.val && p.len >= 4) {
+      g_btPending.cod = *(uint32_t *)p.val;
+    }
+  }
+  g_btPendingNew = true;
+}
+
 static void btInit() {
   if (g_btInited) return;
   g_btSerial = new BluetoothSerial();
   g_btSerial->begin("wrecon-classic", false);
+  esp_bt_gap_register_callback(btGapCb);
   g_btInited = true;
+}
+
+static void btScanPoll() {
+  if (!g_btPendingNew) return;
+  BtDev incoming = g_btPending;
+  g_btPendingNew = false;
+
+  BtDev *e = nullptr;
+  for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
+    if (!g_btDevs[i].used) continue;
+    if (memcmp(g_btDevs[i].mac, incoming.mac, 6) == 0) { e = &g_btDevs[i]; break; }
+  }
+  if (!e) {
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) {
+      if (!g_btDevs[i].used) { e = &g_btDevs[i]; break; }
+    }
+    if (!e) e = &g_btDevs[g_btEvict++ % MAX_BT_DEVS];
+    *e = incoming;
+    e->used = true;
+    g_btDevCount++;
+  }
+  e->hits++;
+  e->lastSeen = millis();
+  if (incoming.name[0]) memcpy(e->name, incoming.name, sizeof(e->name));
+  e->rssi = incoming.rssi;
+  e->cod = incoming.cod;
+
+  char mac[18];
+  macToStr(e->mac, mac);
+  JsonDocument d;
+  d["type"] = "bt_device";
+  d["addr"] = mac;
+  if (e->name[0]) d["name"] = e->name;
+  d["rssi"] = e->rssi;
+  d["cod"] = e->cod;
+  d["hits"] = e->hits;
+  sendJson(d);
+
+  if (g_btAutoAdd) {
+    bool exists = false;
+    for (uint16_t i = 0; i < MAX_TARGETS; i++) {
+      if (g_btTargets[i].used && memcmp(g_btTargets[i].bssid, e->mac, 6) == 0) { exists = true; break; }
+    }
+    if (!exists) {
+      for (uint16_t i = 0; i < MAX_TARGETS; i++) {
+        if (g_btTargets[i].used) continue;
+        g_btTargets[i].used = true;
+        memcpy(g_btTargets[i].bssid, e->mac, 6);
+        emitConfig();
+        break;
+      }
+    }
+  }
+}
+
+static void btScanTick() {
+  if (!g_btScanning) return;
+  if ((uint32_t)(millis() - g_btScanStarted) >= g_btScanMs) {
+    esp_bt_gap_cancel_discovery();
+    g_btScanning = false;
+    JsonDocument d;
+    d["type"] = "done";
+    d["kind"] = "bt_scan";
+    d["count"] = g_btDevCount;
+    sendJson(d);
+  }
 }
 
 static uint16_t setBtTargets(JsonArray arr) {
@@ -779,6 +890,8 @@ static void emitConfig() {
   p["bt_mode"]   = g_cfg.btMode;
   p["bt_hold_ms"] = g_cfg.btHoldMs;
   p["bt_gap_ms"]  = g_cfg.btGapMs;
+  p["bt_scan_ms"] = g_cfg.btScanMs;
+  p["bt_auto_add"] = g_cfg.btAutoAdd;
 
   JsonArray t = d["targets"].to<JsonArray>();
   for (uint16_t i = 0; i < MAX_TARGETS; i++) {
@@ -834,6 +947,8 @@ static void emitStatus() {
   bt["running"] = g_btRunning;
   bt["sent"]    = g_btSent;
   bt["errors"]  = g_btErrors;
+  bt["scanning"] = g_btScanning;
+  bt["devices"] = g_btDevCount;
 
   uint16_t targets = 0;
   for (uint16_t i = 0; i < MAX_TARGETS; i++) if (g_targets[i].used) targets++;
@@ -912,6 +1027,8 @@ static void applyParams(JsonObject p) {
   if (getInt(p, "bt_mode", 1, 3, &x)) { g_cfg.btMode = (uint8_t)x; changed = true; }
   if (getInt(p, "bt_hold_ms", 50, 10000, &x)) { g_cfg.btHoldMs = (uint16_t)x; changed = true; }
   if (getInt(p, "bt_gap_ms", 0, 5000, &x)) { g_cfg.btGapMs = (uint16_t)x; changed = true; }
+  if (getInt(p, "bt_scan_ms", 1000, 60000, &x)) { g_cfg.btScanMs = (uint16_t)x; changed = true; }
+  if (getBool(p, "bt_auto_add", &y)) { g_cfg.btAutoAdd = y; changed = true; }
 
   (void)changed;
   if (!g_cfg.hop && g_curCh != g_cfg.channel) {
@@ -1020,10 +1137,44 @@ static void handleLine(const char *line) {
     emitStatus();
     return;
   }
+  if (!strcmp(cmd, "bt_targets")) {
+    if (s_rx["targets"].is<JsonArray>()) setBtTargets(s_rx["targets"].as<JsonArray>());
+    ack(true, "bt targets set", cmd);
+    emitConfig();
+    return;
+  }
+  if (!strcmp(cmd, "bt_scan_start")) {
+    if (s_rx["params"].is<JsonObject>()) applyParams(s_rx["params"].as<JsonObject>());
+    btInit();
+    g_btRunning = false;
+    g_btDiscoveryActive = false;
+    g_btConnected = false;
+    for (uint16_t i = 0; i < MAX_BT_DEVS; i++) g_btDevs[i] = BtDev();
+    g_btDevCount = 0;
+    g_btEvict = 0;
+    g_btAutoAdd = g_cfg.btAutoAdd;
+    g_btScanMs = g_cfg.btScanMs;
+    g_btScanStarted = millis();
+    uint8_t inqLen = (uint8_t)constrain((int)(g_btScanMs / 1280), 1, 0x30);
+    esp_err_t err = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, inqLen, 0);
+    g_btScanning = (err == ESP_OK);
+    ack(g_btScanning, "bt scanning", cmd);
+    emitStatus();
+    return;
+  }
+  if (!strcmp(cmd, "bt_scan_stop")) {
+    g_btScanning = false;
+    esp_bt_gap_cancel_discovery();
+    ack(true, "bt scan stopped", cmd);
+    emitStatus();
+    return;
+  }
   if (!strcmp(cmd, "bt_start")) {
     if (s_rx["params"].is<JsonObject>()) applyParams(s_rx["params"].as<JsonObject>());
     if (s_rx["targets"].is<JsonArray>()) setBtTargets(s_rx["targets"].as<JsonArray>());
     g_btErrors = 0;
+    g_btScanning = false;
+    esp_bt_gap_cancel_discovery();
     g_btRunning = true;
     g_btDiscoveryActive = false;
     g_btConnected = false;
@@ -1048,6 +1199,8 @@ static void handleLine(const char *line) {
     g_bleRunning = false;
     if (g_bleInited) esp_ble_gap_stop_advertising();
     g_btRunning = false;
+    g_btScanning = false;
+    esp_bt_gap_cancel_discovery();
     g_btDiscoveryActive = false;
     g_btConnected = false;
     if (g_btSerial) g_btSerial->disconnect();
@@ -1134,6 +1287,8 @@ void loop() {
   jamTick();
   bleTick();
   btTick();
+  btScanTick();
+  btScanPoll();
 
   if (g_cfg.statsMs && (uint32_t)(millis() - s_lastStats) >= g_cfg.statsMs) {
     s_lastStats = millis();

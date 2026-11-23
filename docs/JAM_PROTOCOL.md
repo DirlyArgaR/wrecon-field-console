@@ -39,6 +39,13 @@ perintah TX tambahan. Firmware: `jammer-firmware/`.
 },"payload":"1e ff 4c 00 ..."}   // opsional, hex, maks 31 byte -> mode 4
 {"cmd":"ble_stop"}
 
+{"cmd":"bt_targets","targets":["AA:BB:CC:DD:EE:FF"]}
+{"cmd":"bt_scan_start","params":{
+  "bt_scan_ms":8000,             // 1000..60000
+  "bt_auto_add":true             // otomatis masukkan hasil scan ke target
+}}
+{"cmd":"bt_scan_stop"}
+
 {"cmd":"bt_start","params":{
   "bt_mode":1,                   // 1 inquiry flood, 2 connect/disconnect, 3 both
   "bt_hold_ms":400,              // 50..10000
@@ -57,19 +64,23 @@ BSSID-nya diketahui.
 {"type":"hello","fw":"1.0.0-jam","chip":"ESP32","serial":921600,"proto":2}
 
 {"type":"config","params":{...sama seperti di atas...},
- "targets":["AA:BB:CC:DD:EE:FF"],"client_targets":[],"jamming":false}
+ "targets":["AA:BB:CC:DD:EE:FF"],"client_targets":[],
+  "bt_targets":["AA:BB:CC:DD:EE:FF"],"jamming":false}
 
 {"type":"status","ts":12345,"jamming":true,"channel":6,
  "targets":1,
  "stats":{"frames":420,"aps":38,"clients":12,"tx":8000,"tx_errors":0,
           "rx_dropped":0,"ring_dropped":0},
  "ble":{"running":false,"sent":0,"errors":0},
- "radio":{"running":false,"sent":0,"cc_ready":false,"nrf_ready":false}}
+ "bt":{"running":false,"sent":0,"errors":0,"scanning":false,"devices":0}}
 
 {"type":"wifi","ts":12345,"bssid":"AA:BB:CC:DD:EE:FF","ssid":"lab",
  "hidden":false,"ch":6,"rssi":-61,"auth":"wpa2","hits":3}
 {"type":"client","ts":12345,"addr":"11:22:33:44:55:66",
  "bssid":"AA:BB:CC:DD:EE:FF","ch":6,"rssi":-67,"hits":2}
+{"type":"bt_device","addr":"60:FF:9E:87:F0:5F","name":"Headphone",
+ "rssi":-65,"cod":2621460,"hits":1}
+{"type":"done","kind":"bt_scan","count":1}
 {"type":"rsp","ok":true,"cmd":"jam_start","msg":"jamming"}
 ```
 

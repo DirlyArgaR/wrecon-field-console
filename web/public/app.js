@@ -9,6 +9,7 @@ let snap = {
   targets: [],
   clientTargets: [],
   btTargets: [],
+  btDevices: [],
   log: [],
 };
 
@@ -127,6 +128,12 @@ function handleMsg(msg) {
     case 'sta':
       upsert(snap.stas, msg.addr || msg.a, msg);
       break;
+    case 'bt_device':
+      upsert(snap.btDevices, msg.addr, msg);
+      break;
+    case 'done':
+      if (msg.kind === 'bt_scan') pushLocalLog('in', `bt_scan selesai: ${msg.count} perangkat`);
+      return;
     case 'rsp':
       pushLocalLog(msg.ok ? 'in' : 'err', `${msg.cmd || '?'}: ${msg.msg || ''}`);
       return;
@@ -167,6 +174,8 @@ function renderConfigFromSnap() {
   setVal('bt-mode', p.bt_mode);
   setVal('bt-hold-ms', p.bt_hold_ms);
   setVal('bt-gap-ms', p.bt_gap_ms);
+  setVal('bt-scan-ms', p.bt_scan_ms);
+  if (p.bt_auto_add !== undefined) $('bt-auto-add').checked = !!p.bt_auto_add;
 }
 
 function isJammerFirmware() {
@@ -284,15 +293,42 @@ function renderExtra() {
   $('bt-state').classList.toggle('active', !!bt.running);
   $('bt-sent').textContent = bt.sent || 0;
   $('bt-err').textContent = bt.errors || 0;
+  $('bt-scan-state').textContent = bt.scanning ? 'SCANNING' : 'IDLE';
+  $('bt-scan-state').classList.toggle('active', !!bt.scanning);
+  $('bt-found').textContent = bt.devices || (snap.btDevices || []).length || 0;
+  $('kpi-bt').textContent = `${ble.sent || 0} / ${bt.sent || 0}`;
 
   const btTargets = Array.isArray(snap.btTargets) ? snap.btTargets : [];
+  $('bt-target-count').textContent = btTargets.length;
   $('bt-target-chips').innerHTML = btTargets.length
     ? btTargets.map((m) => `<span class="chip">${esc(m)}<button data-bt-remove="${esc(m)}" title="remove">&times;</button></span>`).join('')
-    : '';
+    : '<span class="muted">belum ada target</span>';
   $('bt-target-chips').querySelectorAll('button[data-bt-remove]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      snap.btTargets = btTargets.filter((m) => m !== btn.dataset.btRemove);
+      const next = btTargets.filter((m) => m !== btn.dataset.btRemove);
+      snap.btTargets = next;
+      send({ cmd: 'bt_targets', targets: next });
       renderExtra();
+    });
+  });
+
+  const devices = Array.isArray(snap.btDevices) ? snap.btDevices : [];
+  $('bt-device-count').textContent = devices.length;
+  $('bt-devices').querySelector('tbody').innerHTML = devices.slice().reverse().map((d) => `
+    <tr>
+      <td title="${esc(d.name || '')}">${esc(d.name || '&lt;unknown&gt;')}</td>
+      <td>${esc(d.addr)}</td>
+      <td>${esc(d.rssi)}</td>
+      <td><button class="small ghost" data-bt-device="${esc(d.addr)}">ADD</button></td>
+    </tr>`).join('');
+  $('bt-devices').querySelectorAll('button[data-bt-device]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const set = new Set(Array.isArray(snap.btTargets) ? snap.btTargets : []);
+      set.add(btn.dataset.btDevice);
+      snap.btTargets = [...set];
+      send({ cmd: 'bt_targets', targets: snap.btTargets });
+      renderExtra();
+      pushLocalLog('in', `target BT ditambah: ${btn.dataset.btDevice}`);
     });
   });
 }
@@ -377,7 +413,18 @@ function btAdd() {
   set.add(mac);
   snap.btTargets = [...set];
   $('bt-mac').value = '';
+  send({ cmd: 'bt_targets', targets: snap.btTargets });
   renderExtra();
+}
+
+function btScanStart() {
+  send({
+    cmd: 'bt_scan_start',
+    params: {
+      bt_scan_ms: Number($('bt-scan-ms').value),
+      bt_auto_add: $('bt-auto-add').checked,
+    },
+  });
 }
 
 function btStart() {
@@ -412,6 +459,8 @@ $('btn-start').addEventListener('click', startJam);
 $('btn-stop').addEventListener('click', () => send({ cmd: 'jam_stop' }));
 $('btn-ble-start').addEventListener('click', bleStart);
 $('btn-ble-stop').addEventListener('click', () => send({ cmd: 'ble_stop' }));
+$('btn-bt-scan').addEventListener('click', btScanStart);
+$('btn-bt-scan-stop').addEventListener('click', () => send({ cmd: 'bt_scan_stop' }));
 $('btn-bt-add').addEventListener('click', btAdd);
 $('bt-mac').addEventListener('keydown', (e) => { if (e.key === 'Enter') btAdd(); });
 $('btn-bt-start').addEventListener('click', btStart);
@@ -424,6 +473,18 @@ $('btn-clear').addEventListener('click', () => {
   send({ cmd: 'clear' });
   renderAll();
 });
+
+function initTabs() {
+  document.querySelectorAll('.tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = document.querySelector(`.tab-panel[data-panel="${btn.dataset.tab}"]`);
+      if (panel) panel.classList.add('active');
+    });
+  });
+}
 
 function startStream() {
   const es = new EventSource('/api/events');
@@ -440,6 +501,7 @@ function startStream() {
 }
 
 (async function boot() {
+  initTabs();
   renderAll();
   startStream();
   await refreshPorts();
