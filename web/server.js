@@ -34,7 +34,7 @@ const sseClients = new Set();
 const KNOWN = new Set([
   'ping', 'status', 'config', 'set', 'targets', 'clear',
   'jam_start', 'jam_stop', 'ble_start', 'ble_stop',
-  'radio_start', 'radio_stop', 'reset',
+  'bt_start', 'bt_stop', 'reset',
   'mode', 'get_status', 'get_config', 'set_config',
   'scan_wifi', 'scan_ble', 'scan_all', 'stop', 'get_results',
 ]);
@@ -67,6 +67,7 @@ function snapshot() {
     stas: [...state.stas.values()],
     targets: state.targets,
     clientTargets: state.clientTargets,
+    btTargets: (state.config && state.config.bt_targets) || [],
     log: state.log.slice(-80),
   };
 }

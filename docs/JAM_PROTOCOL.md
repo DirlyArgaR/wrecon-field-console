@@ -39,16 +39,12 @@ perintah TX tambahan. Firmware: `jammer-firmware/`.
 },"payload":"1e ff 4c 00 ..."}   // opsional, hex, maks 31 byte -> mode 4
 {"cmd":"ble_stop"}
 
-{"cmd":"radio_start","params":{
-  "radio_module":1,              // 1 CC1101, 2 nRF24, 3 dua-duanya
-  "cc_mode":1,                   // 1 single freq, 2 sweep band
-  "cc_freq":433.92,              // 300..930 MHz
-  "nrf_mode":1,                  // 1 single channel, 2 sweep 0..125
-  "nrf_channel":0,
-  "pin_cc_cs":5,"pin_nrf_ce":4,"pin_nrf_cs":15,
-  "pin_spi_sck":18,"pin_spi_miso":19,"pin_spi_mosi":23
-}}
-{"cmd":"radio_stop"}
+{"cmd":"bt_start","params":{
+  "bt_mode":1,                   // 1 inquiry flood, 2 connect/disconnect, 3 both
+  "bt_hold_ms":400,              // 50..10000
+  "bt_gap_ms":100                // 0..5000
+},"targets":["AA:BB:CC:DD:EE:FF"]}
+{"cmd":"bt_stop"}
 ```
 
 `jam_start` mengganti target bila `targets` dikirim. `client_targets` hanya

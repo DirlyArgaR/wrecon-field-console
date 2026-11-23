@@ -8,6 +8,7 @@ let snap = {
   stas: [],
   targets: [],
   clientTargets: [],
+  btTargets: [],
   log: [],
 };
 
@@ -113,6 +114,7 @@ function handleMsg(msg) {
       // Firmware pasif tidak mengirim field ini — jangan timpa target lokal.
       if (Array.isArray(msg.targets)) snap.targets = msg.targets;
       if (Array.isArray(msg.client_targets)) snap.clientTargets = msg.client_targets;
+      if (Array.isArray(msg.bt_targets)) snap.btTargets = msg.bt_targets;
       break;
     case 'status':
       snap.status = msg;
@@ -162,17 +164,9 @@ function renderConfigFromSnap() {
   setVal('ble-adv-ms', p.ble_adv_ms);
   setVal('ble-gap-ms', p.ble_burst_gap_ms);
   setVal('ble-power', p.ble_power);
-  setVal('radio-module', p.radio_module);
-  setVal('cc-mode', p.cc_mode);
-  setVal('cc-freq', p.cc_freq);
-  setVal('nrf-mode', p.nrf_mode);
-  setVal('nrf-ch', p.nrf_channel);
-  setVal('pin-cc-cs', p.pin_cc_cs);
-  setVal('pin-nrf-ce', p.pin_nrf_ce);
-  setVal('pin-nrf-cs', p.pin_nrf_cs);
-  setVal('pin-sck', p.pin_spi_sck);
-  setVal('pin-miso', p.pin_spi_miso);
-  setVal('pin-mosi', p.pin_spi_mosi);
+  setVal('bt-mode', p.bt_mode);
+  setVal('bt-hold-ms', p.bt_hold_ms);
+  setVal('bt-gap-ms', p.bt_gap_ms);
 }
 
 function isJammerFirmware() {
@@ -196,8 +190,8 @@ function renderConn() {
   $('btn-apply').disabled = !jammer;
   $('btn-ble-start').disabled = !jammer;
   $('btn-ble-stop').disabled = !jammer;
-  $('btn-radio-start').disabled = !jammer;
-  $('btn-radio-stop').disabled = !jammer;
+  $('btn-bt-start').disabled = !jammer;
+  $('btn-bt-stop').disabled = !jammer;
 }
 
 function renderTables() {
@@ -280,17 +274,27 @@ function renderLog() {
 
 function renderExtra() {
   const ble = (snap.status && snap.status.ble) || {};
-  const radio = (snap.status && snap.status.radio) || {};
+  const bt = (snap.status && snap.status.bt) || {};
   $('ble-state').textContent = ble.running ? 'ACTIVE' : 'IDLE';
   $('ble-state').classList.toggle('active', !!ble.running);
   $('ble-sent').textContent = ble.sent || 0;
   $('ble-err').textContent = ble.errors || 0;
 
-  $('radio-state').textContent = radio.running ? 'ACTIVE' : 'IDLE';
-  $('radio-state').classList.toggle('active', !!radio.running);
-  $('radio-sent').textContent = radio.sent || 0;
-  $('cc-ready').textContent = radio.cc_ready ? 'OK' : '-';
-  $('nrf-ready').textContent = radio.nrf_ready ? 'OK' : '-';
+  $('bt-state').textContent = bt.running ? 'ACTIVE' : 'IDLE';
+  $('bt-state').classList.toggle('active', !!bt.running);
+  $('bt-sent').textContent = bt.sent || 0;
+  $('bt-err').textContent = bt.errors || 0;
+
+  const btTargets = Array.isArray(snap.btTargets) ? snap.btTargets : [];
+  $('bt-target-chips').innerHTML = btTargets.length
+    ? btTargets.map((m) => `<span class="chip">${esc(m)}<button data-bt-remove="${esc(m)}" title="remove">&times;</button></span>`).join('')
+    : '';
+  $('bt-target-chips').querySelectorAll('button[data-bt-remove]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      snap.btTargets = btTargets.filter((m) => m !== btn.dataset.btRemove);
+      renderExtra();
+    });
+  });
 }
 
 function renderAll() {
@@ -363,22 +367,28 @@ function bleStart() {
   send(hex ? { cmd: 'ble_start', params, payload: hex } : { cmd: 'ble_start', params });
 }
 
-function radioStart() {
+function btAdd() {
+  const mac = $('bt-mac').value.trim().toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) {
+    pushLocalLog('err', 'invalid BT MAC');
+    return;
+  }
+  const set = new Set(Array.isArray(snap.btTargets) ? snap.btTargets : []);
+  set.add(mac);
+  snap.btTargets = [...set];
+  $('bt-mac').value = '';
+  renderExtra();
+}
+
+function btStart() {
   send({
-    cmd: 'radio_start',
+    cmd: 'bt_start',
     params: {
-      radio_module: Number($('radio-module').value),
-      cc_mode: Number($('cc-mode').value),
-      cc_freq: Number($('cc-freq').value),
-      nrf_mode: Number($('nrf-mode').value),
-      nrf_channel: Number($('nrf-ch').value),
-      pin_cc_cs: Number($('pin-cc-cs').value),
-      pin_nrf_ce: Number($('pin-nrf-ce').value),
-      pin_nrf_cs: Number($('pin-nrf-cs').value),
-      pin_spi_sck: Number($('pin-sck').value),
-      pin_spi_miso: Number($('pin-miso').value),
-      pin_spi_mosi: Number($('pin-mosi').value),
+      bt_mode: Number($('bt-mode').value),
+      bt_hold_ms: Number($('bt-hold-ms').value),
+      bt_gap_ms: Number($('bt-gap-ms').value),
     },
+    targets: Array.isArray(snap.btTargets) ? snap.btTargets : [],
   });
 }
 
@@ -402,8 +412,10 @@ $('btn-start').addEventListener('click', startJam);
 $('btn-stop').addEventListener('click', () => send({ cmd: 'jam_stop' }));
 $('btn-ble-start').addEventListener('click', bleStart);
 $('btn-ble-stop').addEventListener('click', () => send({ cmd: 'ble_stop' }));
-$('btn-radio-start').addEventListener('click', radioStart);
-$('btn-radio-stop').addEventListener('click', () => send({ cmd: 'radio_stop' }));
+$('btn-bt-add').addEventListener('click', btAdd);
+$('bt-mac').addEventListener('keydown', (e) => { if (e.key === 'Enter') btAdd(); });
+$('btn-bt-start').addEventListener('click', btStart);
+$('btn-bt-stop').addEventListener('click', () => send({ cmd: 'bt_stop' }));
 $('btn-clear').addEventListener('click', () => {
   snap.aps = [];
   snap.stas = [];
