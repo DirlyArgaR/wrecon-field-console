@@ -19,7 +19,7 @@
 #define BLE_ADV_MS        25
 #define BLE_GAP_MS        10
 #define BLE_POWER         9
-#define BT_INQUIRY_MS     6000
+#define BT_INQUIRY_MS     10000
 #define BT_CONNECT_ENABLE true
 #define BT_CONNECT_HOLD_MS 500
 #define BT_CONNECT_GAP_MS  200
@@ -85,6 +85,7 @@ static uint32_t btInquiryCount = 0;
 static uint32_t btConnectCount = 0;
 static uint32_t btConnectErrors = 0;
 static bool     btConnected = false;
+static bool     btLimited = false;
 
 /* ---- BLE --------------------------------------------------------------- */
 
@@ -226,7 +227,10 @@ static void btPollResults() {
 
 static void btStartInquiry() {
   btRestartInquiry = false;
-  esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 0x08, 0);
+  btLimited = !btLimited;
+  esp_bt_gap_start_discovery(
+    btLimited ? ESP_BT_INQ_MODE_LIMITED_INQUIRY : ESP_BT_INQ_MODE_GENERAL_INQUIRY,
+    0x0a, 0);
   btInquiryCount++;
 }
 
