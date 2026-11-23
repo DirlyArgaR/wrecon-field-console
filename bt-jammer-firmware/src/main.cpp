@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include <BLEDevice.h>
 #include <BluetoothSerial.h>
 #include <esp_bt.h>
@@ -302,9 +303,14 @@ static uint32_t lastStatus = 0;
 
 void setup() {
   Serial.begin(921600);
-  delay(100);
+  // Sama seperti firmware gabungan yang sudah terbukti stabil: WiFi dulu,
+  // baru BLE, baru BT Classic — ada jeda supaya controller BT siap.
+  WiFi.mode(WIFI_STA);
+  delay(500);
   bleInit();
+  delay(500);
   btInit();
+  delay(500);
   btStateStart = millis();
   btStartInquiry();
 }
