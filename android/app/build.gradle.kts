@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.wrecon"
         minSdk = 26          // USB Host + SerialInputOutputManager stabil di O ke atas
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.0-optimized"
+        versionCode = 4
+        versionName = "3.1-watchdog"
     }
 
     buildFeatures { compose = true }

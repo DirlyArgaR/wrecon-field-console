@@ -105,6 +105,10 @@ class UsbSerialLink(private val ctx: Context) {
         }
     }
 
+    fun markWriteError(message: String) {
+        _state.value = LinkState.Error(message)
+    }
+
     fun close() {
         io?.stop()
         io = null

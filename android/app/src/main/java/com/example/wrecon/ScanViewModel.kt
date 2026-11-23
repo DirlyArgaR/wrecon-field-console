@@ -53,6 +53,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             link.state.collect { st -> _meta.update { it.copy(link = st) } }
         }
+        // Keepalive supaya watchdog firmware tahu app masih hidup.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(2000)
+                if (_meta.value.link is LinkState.Connected) send(Protocol.ping())
+            }
+        }
         // Publish daftar hanya kalau berubah, maksimal ~3 fps.
         viewModelScope.launch {
             while (isActive) {
@@ -130,7 +137,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun selectTab(tab: Int) = _meta.update { it.copy(tab = tab) }
 
     private fun send(line: String) {
-        if (!link.send(line)) log("USB belum terhubung")
+        if (!link.send(line)) {
+            link.markWriteError("USB write gagal")
+            log("USB write gagal — sambung ulang")
+        }
     }
 
     private fun log(s: String) {
@@ -149,7 +159,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
-            is Msg.Rsp -> if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
+            is Msg.Rsp -> {
+                if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
+                else if (msg.cmd in setOf("jam_start", "jam_stop", "targets", "set")) {
+                    log("${msg.cmd.uppercase()}: ${msg.msg}")
+                }
+            }
             is Msg.Status -> _stats.value = msg.stats
 
             is Msg.Wifi -> { wifiMap[msg.ap.bssid] = msg.ap; listsDirty.set(true) }

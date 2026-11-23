@@ -142,6 +142,7 @@ static uint32_t g_txErrors = 0;
 static int      g_txLastErr = 0;
 static uint32_t g_sendCalls = 0;
 static uint32_t g_injectCalls = 0;
+static uint32_t g_lastCmdMs = 0;
 
 static bool     g_bleInited = false;
 static bool     g_bleRunning = false;
@@ -205,6 +206,7 @@ static void sendJson(JsonDocument &d) {
 }
 
 static void emitConfig();
+static void emitStatus();
 
 static void ack(bool ok, const char *msg, const char *cmd) {
   JsonDocument d;
@@ -894,6 +896,14 @@ static void jamTick() {
   if (!g_jamming) return;
   uint32_t now = millis();
 
+  // Watchdog: kalau perintah kontrol hilang (USB cabut / app crash), TX stop.
+  if (g_lastCmdMs && (uint32_t)(now - g_lastCmdMs) > 8000) {
+    g_jamming = false;
+    s_burstLeft = 0;
+    emitStatus();
+    return;
+  }
+
   if (s_burstLeft == 0 && (uint32_t)(now - s_lastBurst) >= g_cfg.burstGapMs) {
     s_burstLeft = g_cfg.burst;
     s_lastBurst = now;
@@ -1110,6 +1120,7 @@ static void handleLine(const char *line) {
     return;
   }
 
+  g_lastCmdMs = millis();
   const char *cmd = s_rx["cmd"] | "";
 
   if (!strcmp(cmd, "ping")) {
