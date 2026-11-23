@@ -82,7 +82,7 @@ struct Config {
   uint8_t  btMode     = 1;      // 1 inquiry flood, 2 connect/disconnect, 3 both
   uint16_t btHoldMs   = 400;    // durasi inquiry / koneksi
   uint16_t btGapMs    = 100;    // jeda antar siklus
-  uint16_t btScanMs   = 8000;   // durasi auto scan
+  uint16_t btScanMs   = 15000;  // durasi auto scan
   bool     btAutoAdd  = false;  // otomatis masukkan hasil scan ke target
 };
 
@@ -185,7 +185,9 @@ static volatile bool g_btPendingNew = false;
 static bool     g_btScanning = false;
 static bool     g_btAutoAdd = false;
 static uint32_t g_btScanStarted = 0;
-static uint32_t g_btScanMs = 8000;
+static uint32_t g_btScanMs = 15000;
+static bool     g_btRestartScan = false;
+static bool     g_btLimited = false;
 static uint16_t g_btEvict = 0;
 static uint32_t g_sniffFrames = 0;
 static uint32_t g_rxDrops = 0;
@@ -350,6 +352,12 @@ static void bleTick() {
 /* ---- Bluetooth Classic (BR/EDR) ---------------------------------------- */
 
 static void btGapCb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+  if (event == ESP_BT_GAP_DISC_STATE_CHANGED_EVT) {
+    if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED && g_btScanning) {
+      g_btRestartScan = true;  // sweep berikutnya (general <-> limited)
+    }
+    return;
+  }
   if (g_btPendingNew) return;
 
   if (event == ESP_BT_GAP_READ_REMOTE_NAME_EVT) {
@@ -467,16 +475,32 @@ static void btScanPoll() {
   }
 }
 
+static void btStartDiscovery() {
+  uint8_t inqLen = (uint8_t)constrain((int)(g_btScanMs / 1280), 1, 0x30);
+  esp_bt_inq_mode_t mode = g_btLimited
+    ? ESP_BT_INQ_MODE_LIMITED_INQUIRY
+    : ESP_BT_INQ_MODE_GENERAL_INQUIRY;
+  esp_bt_gap_start_discovery(mode, inqLen, 0);
+}
+
 static void btScanTick() {
   if (!g_btScanning) return;
-  if ((uint32_t)(millis() - g_btScanStarted) >= g_btScanMs) {
+  uint32_t elapsed = (uint32_t)(millis() - g_btScanStarted);
+  if (elapsed >= g_btScanMs) {
     esp_bt_gap_cancel_discovery();
     g_btScanning = false;
+    g_btRestartScan = false;
     JsonDocument d;
     d["type"] = "done";
     d["kind"] = "bt_scan";
     d["count"] = g_btDevCount;
     sendJson(d);
+    return;
+  }
+  if (g_btRestartScan) {
+    g_btRestartScan = false;
+    g_btLimited = !g_btLimited;
+    btStartDiscovery();
   }
 }
 
@@ -1196,15 +1220,17 @@ static void handleLine(const char *line) {
     g_btAutoAdd = g_cfg.btAutoAdd;
     g_btScanMs = g_cfg.btScanMs;
     g_btScanStarted = millis();
-    uint8_t inqLen = (uint8_t)constrain((int)(g_btScanMs / 1280), 1, 0x30);
-    esp_err_t err = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, inqLen, 0);
-    g_btScanning = (err == ESP_OK);
+    g_btLimited = false;
+    g_btRestartScan = false;
+    btStartDiscovery();
+    g_btScanning = true;
     ack(g_btScanning, "bt scanning", cmd);
     emitStatus();
     return;
   }
   if (!strcmp(cmd, "bt_scan_stop")) {
     g_btScanning = false;
+    g_btRestartScan = false;
     esp_bt_gap_cancel_discovery();
     ack(true, "bt scan stopped", cmd);
     emitStatus();
