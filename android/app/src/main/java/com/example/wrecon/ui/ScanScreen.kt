@@ -94,10 +94,10 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { StatusCard(link, s.fw, s.chip, s.stats) }
-            item { StatsRow(s.stats) }
+            item(key = "status") { StatusCard(link, s.fw, s.chip, s.stats) }
+            item(key = "stats") { StatsRow(s.stats) }
 
-            item {
+            item(key = "targets") {
                 TargetCard(
                     targets = s.cfg.targets,
                     onRemove = { vm.toggleTarget(it) },
@@ -107,7 +107,7 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
                 )
             }
 
-            item {
+            item(key = "config") {
                 ConfigCard(
                     cfg = s.cfg,
                     chScroll = chScroll,
@@ -122,7 +122,7 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
                 )
             }
 
-            item {
+            item(key = "actions") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { vm.startJam() },
@@ -138,10 +138,10 @@ fun ScanScreen(vm: ScanViewModel, onConnect: () -> Unit) {
             }
 
             if (s.logs.isNotEmpty()) {
-                item { Text(s.logs.first(), color = Danger, fontSize = 11.sp) }
+                item(key = "log") { Text(s.logs.first(), color = Danger, fontSize = 11.sp) }
             }
 
-            item {
+            item(key = "tabs") {
                 TabRow(selectedTabIndex = s.tab) {
                     Tab(s.tab == 0, { vm.selectTab(0) }, text = { Text("ACCESS POINTS") })
                     Tab(s.tab == 1, { vm.selectTab(1) }, text = { Text("CLIENTS") })

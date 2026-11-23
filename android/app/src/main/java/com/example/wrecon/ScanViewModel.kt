@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class UiState(
     val link: LinkState = LinkState.Disconnected,
@@ -36,6 +37,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val wifiMap = ConcurrentHashMap<String, WifiAp>()
     private val clientMap = ConcurrentHashMap<String, ClientDev>()
+    private val listsDirty = AtomicBoolean(true)
 
     init {
         viewModelScope.launch {
@@ -49,10 +51,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (isActive) {
                 delay(250)
+                if (!listsDirty.getAndSet(false)) continue
                 _ui.update { st ->
                     st.copy(
-                        wifi = wifiMap.values.sortedByDescending { it.rssi },
-                        clients = clientMap.values.sortedByDescending { it.rssi },
+                        wifi = wifiMap.values.sortedByDescending { it.rssi }.take(40),
+                        clients = clientMap.values.sortedByDescending { it.rssi }.take(60),
                     )
                 }
             }
@@ -116,6 +119,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun clearScan() {
         wifiMap.clear()
         clientMap.clear()
+        listsDirty.set(true)
         _ui.update { it.copy(wifi = emptyList(), clients = emptyList()) }
         send(Protocol.clear())
     }
@@ -140,8 +144,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             }
             is Msg.Rsp -> if (!msg.ok) log("${msg.cmd}: ${msg.msg}")
             is Msg.Status -> _ui.update { it.copy(stats = msg.stats) }
-            is Msg.Wifi -> wifiMap[msg.ap.bssid] = msg.ap
-            is Msg.Client -> clientMap[msg.dev.addr] = msg.dev
+            is Msg.Wifi -> { wifiMap[msg.ap.bssid] = msg.ap; listsDirty.set(true) }
+            is Msg.Client -> { clientMap[msg.dev.addr] = msg.dev; listsDirty.set(true) }
             null -> Unit
         }
     }
