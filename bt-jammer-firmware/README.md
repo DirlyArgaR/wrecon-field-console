@@ -33,4 +33,15 @@ Ubah konstanta di puncak `src/main.cpp`:
 | `BT_CONNECT_HOLD_MS` | 500 | lama koneksi sebelum diputus |
 | `BT_CONNECT_GAP_MS` | 200 | jeda antar percobaan |
 
+Target tetap bisa ditaruh di `TARGET_MACS` di puncak `src/main.cpp`, atau
+ditambah saat runtime lewat serial 921600:
+
+```
+add AA:BB:CC:DD:EE:FF
+list
+clear
+```
+
+Status juga mengirim `bt_device` (addr/name/rssi) untuk perangkat yang ketemu.
+
 Partisi `no_ota.csv` dipakai karena flash 4 MB. Ukuran firmware ~1,12 MB.

@@ -14,6 +14,7 @@
 #include <esp_gap_ble_api.h>
 
 #include <cstring>
+#include <cstdio>
 
 /* ---- tuning ---- */
 #define BLE_ADV_MS        25
@@ -25,6 +26,14 @@
 #define BT_CONNECT_GAP_MS  200
 #define BT_MAX_DEVICES    32
 #define STATUS_MS         2000
+
+// Target tetap (opsional). Bisa juga ditambah lewat serial: "add AA:BB:CC:DD:EE:FF"
+static const char *TARGET_MACS[] = {
+  "F0:2C:7B:AE:3F:BE",  // Poco F6
+  "03:7B:B3:75:AD:02",  // XFW-BT
+};
+#define TARGET_MAC_COUNT (sizeof(TARGET_MACS) / sizeof(TARGET_MACS[0]))
+#define MAX_BT_TARGETS   16
 
 /* ---- BLE payloads ---- */
 static uint8_t bleAirpods[] = {
@@ -63,6 +72,13 @@ struct BtDevice {
   char name[40];
   int8_t rssi;
 };
+struct BtTarget {
+  bool used;
+  uint8_t mac[6];
+};
+static BtTarget btTargets[MAX_BT_TARGETS];
+static uint8_t btTargetCount = 0;
+
 static BtDevice btDevices[BT_MAX_DEVICES];
 static uint8_t  btDeviceCount = 0;
 static BtDevice btPending;
@@ -88,6 +104,62 @@ static uint32_t btConnectCount = 0;
 static uint32_t btConnectErrors = 0;
 static bool     btConnected = false;
 static bool     btLimited = false;
+
+static void macToStr(const uint8_t m[6], char out[18]) {
+  snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
+           m[0], m[1], m[2], m[3], m[4], m[5]);
+}
+
+static bool parseMac(const char *s, uint8_t out[6]) {
+  if (!s || strlen(s) != 17) return false;
+  unsigned int m[6];
+  if (sscanf(s, "%02x:%02x:%02x:%02x:%02x:%02x",
+             &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) != 6) return false;
+  for (int i = 0; i < 6; i++) out[i] = (uint8_t)m[i];
+  return true;
+}
+
+static bool addTarget(const char *s) {
+  uint8_t m[6];
+  if (!parseMac(s, m)) return false;
+  for (uint8_t i = 0; i < btTargetCount; i++) {
+    if (memcmp(btTargets[i].mac, m, 6) == 0) return true;
+  }
+  if (btTargetCount >= MAX_BT_TARGETS) return false;
+  btTargets[btTargetCount].used = true;
+  memcpy(btTargets[btTargetCount].mac, m, 6);
+  btTargetCount++;
+  return true;
+}
+
+static void cmdPoll() {
+  static char line[64];
+  static uint8_t len = 0;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (!len) continue;
+      line[len] = 0;
+      len = 0;
+      const char *arg = line;
+      if (!strncmp(line, "add ", 4)) arg = line + 4;
+      else if (!strncmp(line, "clear", 5)) {
+        memset(btTargets, 0, sizeof(btTargets));
+        btTargetCount = 0;
+        Serial.println("targets cleared");
+        continue;
+      } else if (!strncmp(line, "list", 4)) {
+        Serial.printf("targets: %u\n", btTargetCount);
+        continue;
+      }
+      Serial.println(addTarget(arg) ? "target added" : "bad mac / full");
+    } else if (len < sizeof(line) - 1) {
+      line[len++] = c;
+    } else {
+      len = 0;
+    }
+  }
+}
 
 /* ---- BLE --------------------------------------------------------------- */
 
@@ -220,11 +292,25 @@ static void btInit() {
   btInited = true;
 }
 
+static void emitBtDevice(const BtDevice &d) {
+  char mac[18];
+  macToStr(d.mac, mac);
+  JsonDocument doc;
+  doc["type"] = "bt_device";
+  doc["addr"] = mac;
+  doc["name"] = d.name;
+  doc["rssi"] = d.rssi;
+  serializeJson(doc, Serial);
+  Serial.write('\n');
+}
+
 static void btStore(const BtDevice &in) {
   for (uint8_t i = 0; i < BT_MAX_DEVICES; i++) {
     if (btDevices[i].used && memcmp(btDevices[i].mac, in.mac, 6) == 0) {
+      bool newName = !btDevices[i].name[0] && in.name[0];
       if (in.name[0]) memcpy(btDevices[i].name, in.name, sizeof(btDevices[i].name));
       if (in.rssi != -127) btDevices[i].rssi = in.rssi;
+      if (newName) emitBtDevice(btDevices[i]);
       return;
     }
   }
@@ -233,6 +319,7 @@ static void btStore(const BtDevice &in) {
     btDevices[i] = in;
     btDevices[i].used = true;
     if (btDeviceCount < BT_MAX_DEVICES) btDeviceCount++;
+    emitBtDevice(btDevices[i]);
     return;
   }
 }
@@ -284,7 +371,13 @@ static void btTick() {
       if ((uint32_t)(now - btStateStart) < BT_CONNECT_GAP_MS) break;
       uint8_t addr[6];
       bool have = false;
-      for (uint8_t k = 0; k < BT_MAX_DEVICES; k++) {
+      if (btTargetCount) {
+        uint8_t i = (uint8_t)(btConnectIndex % btTargetCount);
+        memcpy(addr, btTargets[i].mac, 6);
+        btConnectIndex = (uint8_t)((i + 1) % btTargetCount);
+        have = true;
+      }
+      for (uint8_t k = 0; !have && k < BT_MAX_DEVICES; k++) {
         uint8_t i = (uint8_t)((btConnectIndex + k) % BT_MAX_DEVICES);
         if (!btDevices[i].used) continue;
         memcpy(addr, btDevices[i].mac, 6);
@@ -338,6 +431,7 @@ static uint32_t lastStatus = 0;
 
 void setup() {
   Serial.begin(921600);
+  for (uint8_t i = 0; i < TARGET_MAC_COUNT; i++) addTarget(TARGET_MACS[i]);
   // Sama seperti firmware gabungan yang sudah terbukti stabil: WiFi dulu,
   // baru BLE, baru BT Classic — ada jeda supaya controller BT siap.
   WiFi.mode(WIFI_STA);
@@ -352,6 +446,7 @@ void setup() {
 }
 
 void loop() {
+  cmdPoll();
   if (!blePaused) bleTick();
   btTick();
 
@@ -367,6 +462,7 @@ void loop() {
     d["connect"] = btConnectCount;
     d["connect_errors"] = btConnectErrors;
     d["devices"] = btDeviceCount;
+    d["targets"] = btTargetCount;
     serializeJson(d, Serial);
     Serial.write('\n');
   }
